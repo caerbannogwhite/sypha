@@ -1,4 +1,5 @@
-#pragma once
+#ifndef COMMON_H
+#define COMMON_H
 
 #include <boost/program_options.hpp>
 #include <iostream>
@@ -54,3 +55,5 @@ SyphaStatus comm_my_simplex_form(Instance &inst);
 SyphaStatus comm_parse_program_args(Parameters &params, int argc, char* argv[]);
 SyphaStatus comm_read_input_file(Instance &inst, Parameters &params);
 SyphaStatus comm_free_instance(Instance &inst);
+
+#endif // COMMON_H
