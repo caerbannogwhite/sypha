@@ -1,38 +1,35 @@
 
 #include "sypha_environment.h"
+#include "sypha_cuda_helper.h"
 
-SyphaEnvironment::SyphaEnvironment()
-{
-    this->PX_INFINITY = 1e50;
-    this->PX_TOLERANCE = 1e-12;
+SyphaEnvironment::SyphaEnvironment() {
+
 }
 
 SyphaEnvironment::SyphaEnvironment(int argc, char *argv[])
 {
+    this->setDefaultParameters();
+    this->readInputArguments(argc, argv);
+    this->setUpDevice();
+}
+
+SyphaStatus SyphaEnvironment::setDefaultParameters() {
+
     this->PX_INFINITY = 1e50;
     this->PX_TOLERANCE = 1e-12;
 
-    this->readInputArguments(argc, argv);
+    this->cudaDeviceId = -1;
+    this->verbosityLevel = 5;
+
+    return CODE_SUCCESFULL;
 }
 
-bool SyphaEnvironment::getSparse()
-{
-    return this->sparse;
-}
+SyphaStatus SyphaEnvironment::setUpDevice() {
 
-int SyphaEnvironment::getSeed()
-{
-    return this->seed;
-}
+    this->logger("Setting up device", "INFO", 2);
+    this->cudaDeviceId = findCudaDevice(this->cudaDeviceId);
 
-int SyphaEnvironment::getThreadNum()
-{
-    return this->threadNum;
-}
-
-double SyphaEnvironment::getTimeLimit()
-{
-    return this->timeLimit;
+    return CODE_SUCCESFULL;
 }
 
 SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
@@ -121,4 +118,26 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
     }
 
     return CODE_SUCCESFULL;
+}
+
+void SyphaEnvironment::logger(string message, string type, int level)
+{
+    string bold = "\e[1m";
+    string boldEnd = "\e[21m";
+    string colorEnd = "\e[39m";
+    string colorGreen = "\e[32m";
+    string colorRed = "\e[31m";
+    string colorYellow = "\e[33m";
+
+    if (type.compare("ERROR") == 0)
+    {
+        cout << bold << colorRed << "[ERROR]" << colorEnd << " " << message << boldEnd << std::endl;
+    } else
+    if (type.compare("INFO") == 0)
+    {
+        if (level < this->verbosityLevel)
+        {
+            cout << colorGreen << "[INFO]" << colorEnd << " " << message << std::endl;
+        }
+    }
 }

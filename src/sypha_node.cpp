@@ -3,14 +3,25 @@
 
 SyphaNode::SyphaNode(SyphaEnvironment &env)
 {
-    this->env = env;
-    this->sparse = env.sparse;
+    this->env = &env;
+    
+    this->setInitValues();
+    this->setUpCuda();
+}
 
-    this->numCols = 0;
-    this->numRows = 0;
-    this->numNonZero = 0;
+SyphaNode::~SyphaNode()
+{
+    if (this->sparse)
+    {
+        checkCudaErrors(cusolverSpDestroy(this->cusolverSpHandle));
+        checkCudaErrors(cusparseDestroy(this->cusparseHandle));
+    }
 
-    this->objectiveValue = 0.0;
+    else
+    {
+        checkCudaErrors(cusolverDnDestroy(this->cusolverDnHandle));
+        checkCudaErrors(cublasDestroy(this->cublasHandle));
+    }
 }
 
 bool SyphaNode::isSparse()
@@ -46,13 +57,13 @@ SyphaStatus SyphaNode::solve()
 
 SyphaStatus SyphaNode::importModel()
 {
-    if (this->env.modelType == MODEL_TYPE_SCP)
+    if (this->env->modelType == MODEL_TYPE_SCP)
     {
         if (this->sparse)
         {
-            model_reader_read_scp_file_dense(*this, this->env.inputFilePath);
+            model_reader_read_scp_file_dense(*this, this->env->inputFilePath);
         } else {
-            model_reader_read_scp_file_sparse(*this, this->env.inputFilePath);
+            model_reader_read_scp_file_sparse(*this, this->env->inputFilePath);
         }
     } else {
         return CODE_MODEL_TYPE_NOT_FOUND;
@@ -94,5 +105,48 @@ SyphaStatus SyphaNode::convert2MySimplexForm()
     }
 
     inst.ncols = inst.ncols + inst.nrows;*/
+    return CODE_SUCCESFULL;
+}
+
+SyphaStatus SyphaNode::setInitValues()
+{
+    this->sparse = this->env->sparse;
+
+    this->numCols = 0;
+    this->numRows = 0;
+    this->numNonZero = 0;
+
+    this->objectiveValue = 0.0;
+
+    return CODE_SUCCESFULL;
+}
+
+SyphaStatus SyphaNode::setUpCuda()
+{
+    // initialize a cuda stream for this node
+    checkCudaErrors(cudaStreamCreate(&this->cudaStream));
+
+    // initialize cusolver Sparse, cusparse
+    if (this->sparse)
+    {
+        checkCudaErrors(cusolverSpCreate(&this->cusolverSpHandle));
+        checkCudaErrors(cusparseCreate(&this->cusparseHandle));
+
+        // bind stream to cusparse and cusolver
+        checkCudaErrors(cusolverSpSetStream(this->cusolverSpHandle, this->cudaStream));
+        checkCudaErrors(cusparseSetStream(this->cusparseHandle, this->cudaStream));
+    }
+
+    // initialize cusolver Dense and cublas
+    else
+    {
+        checkCudaErrors(cusolverDnCreate(&this->cusolverDnHandle));
+        checkCudaErrors(cublasCreate(&this->cublasHandle));
+
+        // bind stream to cublas and cusolver
+        checkCudaErrors(cusolverDnSetStream(this->cusolverDnHandle, this->cudaStream));
+        checkCudaErrors(cublasSetStream(this->cublasHandle, this->cudaStream));
+    }
+
     return CODE_SUCCESFULL;
 }

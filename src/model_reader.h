@@ -3,6 +3,4 @@
 
 #include "common.h"
 
-#include "model_reader.h"
-
 #endif // MODEL_READER_H
