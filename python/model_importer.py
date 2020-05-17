@@ -49,3 +49,12 @@ def sc_model_reader(input_file_path: Path) -> (numpy.array, numpy.array, numpy.a
             mat[i, buffer] = 1.0
 
     return mat, numpy.ones(num_rows), obj
+
+
+def sc_to_standard_form(mat, rhs, obj):
+
+    m, n = mat.shape
+
+    return (numpy.hstack((mat, -numpy.eye(m))),
+           rhs,
+           numpy.hstack((obj, numpy.zeros(m))))
