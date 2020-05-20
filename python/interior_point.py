@@ -50,8 +50,8 @@ def initial_point_computation(mat: numpy.array,
 def mehrotra_linopt(mat: numpy.array,
                     rhs: numpy.array,
                     obj: numpy.array,
-                    eta: float,
-                    k_max: int,
+                    eta=0.9,
+                    k_max=1000,
                     tol_p=1E-9,
                     tol_d=1E-6,
                     tol_o=1E-2):
@@ -67,6 +67,7 @@ def mehrotra_linopt(mat: numpy.array,
 
     """
 
+    log = 0
     m, n = mat.shape
 
     # get the initial point
@@ -82,44 +83,69 @@ def mehrotra_linopt(mat: numpy.array,
 
     iterations = 0
 
+    if log > 2:
+        print("\n")
+        print(f"\t{'mu':10s} | {'mu aff':10s} | {'sigma':10s} | {'alpha p':10s} | {'alpha d':10s} | {'upp':10s} | {'low':10s}")
+        print(f"\t{'-'*10:10s}-|-{'-'*10:10s}-|-{'-'*10:10s}-|-{'-'*10:10s}-|-{'-'*10:10s}-|-{'-'*10:10s}-|-{'-'*10:10s}")
+
     while (
         (iterations < k_max) and
         #((numpy.linalg.norm(r_p) / (1 + numpy.linalg.norm(rhs))) < tol_p) and
         #((numpy.linalg.norm(r_d) / (1 + numpy.linalg.norm(obj))) < tol_d) and
         #((mu / (1 + obj.dot(x))) < tol_o)
-        (mu > 1E-16)
+        (mu > 1E-4)
     ):
+
+        #print((x > 0.0).all(), (s > 0.0).all(), mu)
 
         X = numpy.diag(x)
         S = numpy.diag(s)
         r_xs = X.dot(S).dot(numpy.ones(n))
+
         S_inv = numpy.linalg.inv(S)
         D = X.dot(S_inv)
         ADA = mat.dot(D.dot(mat.T))
-
         # affine step
         delta_y_aff = numpy.linalg.solve(ADA, -r_b - mat.dot(D).dot(r_c) + mat.dot(S_inv.dot(r_xs)))
         delta_s_aff = -r_c - mat.T.dot(delta_y_aff)
         delta_x_aff = -S_inv.dot(r_xs) - D.dot(delta_s_aff)
+
+        #row_1 = numpy.hstack((numpy.zeros((n, n)), mat.T, numpy.eye(n, n)))
+        #row_2 = numpy.hstack((mat, numpy.zeros((m, m)), numpy.zeros((m, n))))
+        #row_3 = numpy.hstack((S, numpy.zeros((n, m)), X))
+        #A = numpy.vstack((row_1, row_2, row_3))
+        #b = numpy.hstack((-r_c, -r_b, -r_xs))
+        #sol = numpy.linalg.solve(A, b)
+        #delta_x_aff = sol[:n]
+        #delta_s_aff = sol[n+m:]
 
         # affine step length, definition 14.32 at page 408(427)
         alpha_max_p = min([-xi / delta_xi for xi, delta_xi in zip(x, delta_x_aff) if delta_xi < 0.0])
         alpha_max_d = min([-si / delta_si for si, delta_si in zip(s, delta_s_aff) if delta_si < 0.0])
         alpha_aff_p = min(1.0, alpha_max_p)
         alpha_aff_d = min(1.0, alpha_max_d)
-        mu_aff = (x + alpha_aff_p * delta_x_aff).dot(s + alpha_aff_d * delta_s_aff) / float(m)
+
+        mu_aff = (x + alpha_aff_p * delta_x_aff).dot(s + alpha_aff_d * delta_s_aff) / float(n)
 
         # corrector step or centering parameter
         sigma = (mu_aff / mu) ** 3
 
         DELTA_X_aff = numpy.diag(delta_x_aff)
         DELTA_S_aff = numpy.diag(delta_s_aff)
-        r_xs += DELTA_X_aff.dot(DELTA_S_aff).dot(numpy.ones(n)) - sigma * mu
+        r_xs = r_xs + DELTA_X_aff.dot(DELTA_S_aff).dot(numpy.ones(n)) - sigma * mu
 
         delta_y = numpy.linalg.solve(ADA, -r_b - mat.dot(D).dot(r_c) + mat.dot(S_inv.dot(r_xs)))
         delta_s = -r_c - mat.T.dot(delta_y)
         delta_x = -S_inv.dot(r_xs) - D.dot(delta_s)
 
+        #b = numpy.hstack((-r_c, -r_b, -r_xs))
+        #sol = numpy.linalg.solve(A, b)
+        #delta_x = sol[:n]
+        #delta_y = sol[n:n+m]
+        #delta_s = sol[n+m:]
+
+        alpha_max_p = min([-xi / delta_xi for xi, delta_xi in zip(x, delta_x) if delta_xi < 0.0])
+        alpha_max_d = min([-si / delta_si for si, delta_si in zip(s, delta_s) if delta_si < 0.0])
         alpha_p = min(1.0, eta * alpha_max_p)
         alpha_d = min(1.0, eta * alpha_max_d)
 
@@ -127,11 +153,14 @@ def mehrotra_linopt(mat: numpy.array,
         y += alpha_d * delta_y
         s += alpha_d * delta_s
         
-        #print(mu, mu_aff, sigma)
+        if log > 2:
+            upp = x[:n-m].dot(obj[:n-m])
+            low = y.dot(rhs)
+            print(f"\t{mu:10f} | {mu_aff:10f} | {sigma:10f} | {alpha_p:10f} | {alpha_d:10f} | {upp:10f} | {low:10f}")
 
         # update
-        r_b = mat.dot(x) - rhs
-        r_c = mat.T.dot(y) + s - obj
+        r_b = (1.0 - alpha_p) * r_b
+        r_c = (1.0 - alpha_d) * r_c
 
         mu = x.dot(s) / float(n)
 
