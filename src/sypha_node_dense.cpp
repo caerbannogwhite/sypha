@@ -62,8 +62,10 @@ SyphaStatus SyphaNode::importModel()
         if (this->sparse)
         {
             model_reader_read_scp_file_dense(*this, this->env->inputFilePath);
+            model_reader_scp_model_to_standard_dense(*this);
         } else {
             model_reader_read_scp_file_sparse(*this, this->env->inputFilePath);
+            model_reader_scp_model_to_standard_sparse(*this);
         }
     } else {
         return CODE_MODEL_TYPE_NOT_FOUND;

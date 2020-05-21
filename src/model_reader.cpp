@@ -83,6 +83,13 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNode &node, string inputFilePa
     return CODE_SUCCESFULL;
 }
 
+
+SyphaStatus model_reader_scp_model_to_standard_dense(SyphaNode &node, string inputFilePath)
+{
+
+    return CODE_SUCCESFULL;
+}
+
 SyphaStatus model_reader_read_scp_file_sparse(SyphaNode &node, string inputFilePath)
 {
     int lineCounter = 0, currColNumber, colIdx = 0, rowIdx = 0, num;
@@ -158,5 +165,11 @@ SyphaStatus model_reader_read_scp_file_sparse(SyphaNode &node, string inputFileP
     }*/
 
     fclose(inputFileHandler);
+    return CODE_SUCCESFULL;
+}
+
+SyphaStatus model_reader_scp_model_to_standard_sparse(SyphaNode &node, string inputFilePath)
+{
+
     return CODE_SUCCESFULL;
 }

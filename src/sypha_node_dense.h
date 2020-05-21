@@ -28,6 +28,8 @@ private:
     double *d_MatDns;
     double *d_ObjDns;
     double *d_RhsDns;
+
+    
     SyphaEnvironment *env;
 
     cudaStream_t cudaStream;
@@ -53,6 +55,8 @@ public:
 
     friend SyphaStatus model_reader_read_scp_file_dense(SyphaNode &node, string inputFilePath);
     friend SyphaStatus model_reader_read_scp_file_sparse(SyphaNode &node, string inputFilePath);
+    friend SyphaStatus model_reader_scp_model_to_standard_dense(SyphaNode &node);
+    friend SyphaStatus model_reader_scp_model_to_standard_sparse(SyphaNode &node);
 };
 
 #endif // SYPHA_NODE_H
