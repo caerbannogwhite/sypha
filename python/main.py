@@ -52,17 +52,18 @@ counter_ok = 0
 #    if launch(path, f"scp_demo{i:02d}", sparse=True):
 #        counter_ok += 1
 
-#for i in range(10):
-#    path = Path("C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scp4{:d}.txt".format(i+1))
-#    counter += 1
-#    if launch(path, "scp4{:d}".format(i+1)):
-#        counter_ok += 1
-
 for i in range(10):
-    path = Path("C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scp5{:d}.txt".format(i+1))
+    #path = Path(f"C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scp4{i+1}.txt")
+    path = Path(f"/home/macs/coding/optimization/sypha/data/scp4{i+1}.txt")
     counter += 1
-    if launch(path, f"scp5{i+1:d}", sparse=True):
+    if launch(path, "scp4{:d}".format(i+1)):
         counter_ok += 1
+
+#for i in range(10):
+#    path = Path("C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scp5{:d}.txt".format(i+1))
+#    counter += 1
+#    if launch(path, f"scp5{i+1:d}", sparse=True):
+#        counter_ok += 1
 
 #for p in product(["e", "f",], range(1,6)):
 #    path = Path("C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scpnr{}{}.txt".format(*p))

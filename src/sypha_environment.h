@@ -4,7 +4,8 @@
 #include <cuda_runtime.h>
 
 #include "common.h"
-#include "sypha_node.h"
+#include "sypha_node_dense.h"
+#include "sypha_node_sparse.h"
 
 class SyphaEnvironment
 {
@@ -34,7 +35,8 @@ public:
 
     void logger(string message, string type, int level);
 
-    friend class SyphaNode;
+    friend class SyphaNodeDense;
+    friend class SyphaNodeSparse;
 };
 
 #endif // SYPHA_ENVIRONMENT_H

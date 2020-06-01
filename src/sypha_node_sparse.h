@@ -1,5 +1,5 @@
-#ifndef SYPHA_NODE_H
-#define SYPHA_NODE_H
+#ifndef SYPHA_NODE_SPARSE_H
+#define SYPHA_NODE_SPARSE_H
 
 #include <cuda_runtime.h>
 
@@ -9,10 +9,11 @@
 #include "common.h"
 #include "sypha_environment.h"
 #include "sypha_cuda_helper.h"
+#include "model_reader.h"
 
 class SyphaEnvironment;
 
-class SyphaNode
+class SyphaNodeSparse
 {
 private:
     int numCols;
@@ -38,7 +39,8 @@ private:
     cusolverSpHandle_t cusolverSpHandle;
 
 public:
-    SyphaNode(SyphaEnvironment &env);
+    SyphaNodeSparse(SyphaEnvironment &env);
+    ~SyphaNodeSparse();
 
     int getNumCols();
     int getNumRows();
@@ -51,8 +53,8 @@ public:
     SyphaStatus setInitValues();
     SyphaStatus setUpCuda();
 
-    friend SyphaStatus model_reader_read_scp_file_sparse(SyphaNode &node, string inputFilePath);
-    friend SyphaStatus model_reader_scp_model_to_standard_sparse(SyphaNode &node);
+    friend SyphaStatus model_reader_read_scp_file_sparse(SyphaNodeSparse &node, string inputFilePath);
+    friend SyphaStatus model_reader_scp_model_to_standard_sparse(SyphaNodeSparse &node);
 };
 
-#endif // SYPHA_NODE_H
+#endif // SYPHA_NODE_SPARSE_H

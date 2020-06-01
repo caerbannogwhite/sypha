@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <string>
+#include <vector>
 
 using namespace std;
 namespace po = boost::program_options;

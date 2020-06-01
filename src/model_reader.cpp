@@ -1,8 +1,7 @@
 
 #include "model_reader.h"
-#include "sypha_node.h"
 
-SyphaStatus model_reader_read_scp_file_dense(SyphaNode &node, string inputFilePath)
+SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputFilePath)
 {
     int currColNumber, num;
     int lineCounter = 0;
@@ -83,50 +82,49 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNode &node, string inputFilePa
     return CODE_SUCCESFULL;
 }
 
-
-SyphaStatus model_reader_scp_model_to_standard_dense(SyphaNode &node, string inputFilePath)
+/**
+ *  Read a Set Covering model and convert it to standard form.
+ *  A | S = b 
+ */
+SyphaStatus model_reader_read_scp_file_sparse(SyphaNodeSparse &node, string inputFilePath)
 {
-
-    return CODE_SUCCESFULL;
-}
-
-SyphaStatus model_reader_read_scp_file_sparse(SyphaNode &node, string inputFilePath)
-{
-    int lineCounter = 0, currColNumber, colIdx = 0, rowIdx = 0, num;
+    int lineCounter = 0, currColNumber, num;
+    int nonZeroCounter = 0;
     bool newRowFlag = false;
+
+    vector<int> indeces = new vector();
+    vector<int> indPtrs = new vector();
 
     FILE *inputFileHandler = fopen(inputFilePath.c_str(), "r");
 
-    /*while (!feof(inputFileHandler))
+    while (!feof(inputFileHandler))
     {
         // first row: number of rows and cols
         if (lineCounter == 0)
         {
-            if (!fscanf(inputFileHandler, "%d %d", &inst.nrows, &inst.ncols))
+            if (!fscanf(inputFileHandler, "%d %d", &node.numRows, &node.numCols))
             {
                 perror("ERROR: readInstance on fscanf.");
                 return CODE_ERROR;
             }
 
-            inst.hostObj = (double *)calloc(inst.ncols, sizeof(double));
-            inst.hostMat = (double *)calloc(inst.nrows * inst.ncols, sizeof(double));
+            node.h_ObjDns = (double *)calloc(node.numCols + node.numRows, sizeof(double));
         }
 
-        // costs
-        else if (lineCounter > 0 && lineCounter <= inst.ncols)
+        // costs: lineCounter counts the number of objective entries (num cols)
+        else if (lineCounter > 0 && lineCounter <= node.numCols)
         {
             if (!fscanf(inputFileHandler, "%d", &num))
             {
                 perror("ERROR: readInstance on fscanf.");
                 return CODE_ERROR;
             }
-            inst.hostObj[colIdx++] = num;
+            node.h_ObjDns[colIdx++] = num;
 
-            if (lineCounter == inst.ncols)
+            if (lineCounter == node.numCols)
             {
-                colIdx = 0;
-                rowIdx = 0;
                 newRowFlag = true;
+                indPtrs.push_back(0);
             }
         }
 
@@ -138,6 +136,7 @@ SyphaStatus model_reader_read_scp_file_sparse(SyphaNode &node, string inputFileP
                 perror("ERROR: readInstance on fscanf.");
                 return CODE_ERROR;
             }
+            indPtrs.push_back(currColNumber);
             newRowFlag = false;
         }
 
@@ -150,26 +149,19 @@ SyphaStatus model_reader_read_scp_file_sparse(SyphaNode &node, string inputFileP
                 perror("ERROR: readInstance on fscanf.");
                 return CODE_ERROR;
             }
-            inst.hostMat[rowIdx * inst.ncols + num - 1] = 1;
-            ++colIdx;
+            indeces.push_back(num - 1);
+            ++nonZeroCounter;
 
             if (currColNumber == colIdx)
             {
-                colIdx = 0;
-                ++rowIdx;
                 newRowFlag = true;
+                indPtrs.push_back(nonZeroCounter);
             }
         }
 
         ++lineCounter;
-    }*/
+    }
 
     fclose(inputFileHandler);
-    return CODE_SUCCESFULL;
-}
-
-SyphaStatus model_reader_scp_model_to_standard_sparse(SyphaNode &node, string inputFilePath)
-{
-
     return CODE_SUCCESFULL;
 }

@@ -1,5 +1,5 @@
-#ifndef SYPHA_NODE_H
-#define SYPHA_NODE_H
+#ifndef SYPHA_NODE_DENSE_H
+#define SYPHA_NODE_DENSE_H
 
 #include <cuda_runtime.h>
 
@@ -14,7 +14,7 @@
 
 class SyphaEnvironment;
 
-class SyphaNode
+class SyphaNodeDense
 {
 private:
     bool sparse;
@@ -39,7 +39,8 @@ private:
     cusolverSpHandle_t cusolverSpHandle;
 
 public:
-    SyphaNode(SyphaEnvironment &env);
+    SyphaNodeDense(SyphaEnvironment &env);
+    ~SyphaNodeDense();
 
     bool isSparse();
     int getNumCols();
@@ -53,10 +54,8 @@ public:
     SyphaStatus setInitValues();
     SyphaStatus setUpCuda();
 
-    friend SyphaStatus model_reader_read_scp_file_dense(SyphaNode &node, string inputFilePath);
-    friend SyphaStatus model_reader_read_scp_file_sparse(SyphaNode &node, string inputFilePath);
-    friend SyphaStatus model_reader_scp_model_to_standard_dense(SyphaNode &node);
-    friend SyphaStatus model_reader_scp_model_to_standard_sparse(SyphaNode &node);
+    friend SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputFilePath);
+    friend SyphaStatus model_reader_scp_model_to_standard_dense(SyphaNodeDense &node);
 };
 
-#endif // SYPHA_NODE_H
+#endif // SYPHA_NODE_DENSE_H

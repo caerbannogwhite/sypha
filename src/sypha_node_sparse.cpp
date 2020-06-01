@@ -1,7 +1,7 @@
 
-#include "sypha_node.h"
+#include "sypha_node_sparse.h"
 
-SyphaNode::SyphaNode(SyphaEnvironment &env)
+SyphaNodeSparse::SyphaNodeSparse(SyphaEnvironment &env)
 {
     this->env = &env;
     
@@ -9,91 +9,57 @@ SyphaNode::SyphaNode(SyphaEnvironment &env)
     this->setUpCuda();
 }
 
-SyphaNode::~SyphaNode()
+SyphaNodeSparse::~SyphaNodeSparse()
 {
     checkCudaErrors(cusolverSpDestroy(this->cusolverSpHandle));
     checkCudaErrors(cusparseDestroy(this->cusparseHandle));
 }
 
-int SyphaNode::getNumCols()
+int SyphaNodeSparse::getNumCols()
 {
     return this->numCols;
 }
 
-int SyphaNode::getNumRows()
+int SyphaNodeSparse::getNumRows()
 {
     return this->numRows;
 }
 
-int SyphaNode::getNumNonZero()
+int SyphaNodeSparse::getNumNonZero()
 {
     return this->numRows;
 }
 
-double SyphaNode::getObjectiveValue()
+double SyphaNodeSparse::getObjectiveValue()
 {
     return this->objectiveValue;
 }
 
-SyphaStatus SyphaNode::solve()
+SyphaStatus SyphaNodeSparse::solve()
 {
 
     return CODE_SUCCESFULL;
 }
 
-SyphaStatus SyphaNode::importModel()
+SyphaStatus SyphaNodeSparse::importModel()
 {
     if (this->env->modelType == MODEL_TYPE_SCP)
     {
-        model_reader_read_scp_file_dense(*this, this->env->inputFilePath);
-        model_reader_scp_model_to_standard_dense(*this);
+        model_reader_read_scp_file_sparse(*this, this->env->inputFilePath);
+        model_reader_scp_model_to_standard_sparse(*this);
     } else {
         return CODE_MODEL_TYPE_NOT_FOUND;
     }
     return CODE_SUCCESFULL;
 }
 
-SyphaStatus SyphaNode::copyModelOnDevice()
+SyphaStatus SyphaNodeSparse::copyModelOnDevice()
 {
     return CODE_SUCCESFULL;
 }
 
-SyphaStatus SyphaNode::convert2MySimplexForm()
+SyphaStatus SyphaNodeSparse::setInitValues()
 {
-    /*inst.localObj = (double *)realloc(inst.localObj, (inst.ncols + inst.nrows) * sizeof(double));
-    inst.localMat = (double *)realloc(inst.localMat, (inst.ncols + inst.nrows) * inst.nrows * sizeof(double));
-
-    int i, j;
-
-    for (j = inst.ncols; j < inst.ncols + inst.nrows; ++j)
-    {
-        inst.localObj[j] = 0.0;
-    }
-
-    for (i = inst.nrows - 1; i >= 0; i--)
-    {
-        for (j = 0; j < inst.ncols; ++j)
-        {
-            inst.localMat[i * (inst.ncols + inst.nrows) + j] = -inst.localMat[i * (inst.ncols) + j];
-        }
-    }
-
-    for (i = 0; i < inst.nrows; ++i)
-    {
-        for (j = inst.ncols; j < inst.ncols + inst.nrows; ++j)
-        {
-            inst.localMat[i * (inst.ncols + inst.nrows) + j] = i == (j - inst.ncols) ? 1.0 : 0.0;
-        }
-    }
-
-    inst.ncols = inst.ncols + inst.nrows;*/
-    return CODE_SUCCESFULL;
-}
-
-SyphaStatus SyphaNode::setInitValues()
-{
-    this->sparse = this->env->sparse;
-
     this->numCols = 0;
     this->numRows = 0;
     this->numNonZero = 0;
@@ -103,7 +69,7 @@ SyphaStatus SyphaNode::setInitValues()
     return CODE_SUCCESFULL;
 }
 
-SyphaStatus SyphaNode::setUpCuda()
+SyphaStatus SyphaNodeSparse::setUpCuda()
 {
     // initialize a cuda stream for this node
     checkCudaErrors(cudaStreamCreate(&this->cudaStream));

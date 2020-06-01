@@ -4,7 +4,7 @@
 int main(int argc, char *argv[])
 {
 	SyphaEnvironment *env = new SyphaEnvironment(argc, argv);
-	SyphaNode *mainNode = new SyphaNode(*env);
+	SyphaNodeSparse *mainNode = new SyphaNodeSparse(*env);
 
 	double start = GetTimer();
 
