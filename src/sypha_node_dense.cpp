@@ -46,7 +46,6 @@ SyphaStatus SyphaNodeDense::importModel()
     if (this->env->modelType == MODEL_TYPE_SCP)
     {
         model_reader_read_scp_file_dense(*this, this->env->inputFilePath);
-        model_reader_scp_model_to_standard_dense(*this);
     } else {
         return CODE_MODEL_TYPE_NOT_FOUND;
     }

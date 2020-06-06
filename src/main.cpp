@@ -9,6 +9,7 @@ int main(int argc, char *argv[])
 	double start = GetTimer();
 
 	mainNode->importModel();
+	mainNode->copyModelOnDevice();
 
 
 

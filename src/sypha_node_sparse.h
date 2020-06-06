@@ -20,11 +20,11 @@ private:
     int numRows;
     int numNonZero;
     double objectiveValue;
-    int *h_csrMatIndices;
-    int *h_csrMatIndPtrs;
-    double *h_csrMatVals;
-    double *h_ObjDns;
-    double *h_RhsDns;
+    vector<int> *h_csrMatIndices;
+    vector<int> *h_csrMatIndPtrs;
+    vector<double> *h_csrMatVals;
+    vector<double> *h_ObjDns;
+    vector<double> *h_RhsDns;
     int *d_csrMatIndices;
     int *d_csrMatIndPtrs;
     double *d_csrMatVals;
@@ -49,12 +49,10 @@ public:
     SyphaStatus solve();
     SyphaStatus importModel();
     SyphaStatus copyModelOnDevice();
-    SyphaStatus convert2MySimplexForm();
     SyphaStatus setInitValues();
     SyphaStatus setUpCuda();
 
     friend SyphaStatus model_reader_read_scp_file_sparse(SyphaNodeSparse &node, string inputFilePath);
-    friend SyphaStatus model_reader_scp_model_to_standard_sparse(SyphaNodeSparse &node);
 };
 
 #endif // SYPHA_NODE_SPARSE_H
