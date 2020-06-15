@@ -7,6 +7,8 @@
 #include "sypha_node_dense.h"
 #include "sypha_node_sparse.h"
 
+class SyphaNodeSparse;
+
 class SyphaEnvironment
 {
 private:
@@ -25,6 +27,10 @@ private:
     double PX_INFINITY;
     double PX_TOLERANCE;
 
+    // Merhrotra parameters
+    int MERHROTRA_MAX_ITER;
+    double MERHROTRA_MU_TOL;
+
 public:
     SyphaEnvironment();
     SyphaEnvironment(int argc, char *argv[]);
@@ -37,6 +43,9 @@ public:
 
     friend class SyphaNodeDense;
     friend class SyphaNodeSparse;
+
+    friend SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_merhrotra_init(SyphaNodeSparse &node);
 };
 
 #endif // SYPHA_ENVIRONMENT_H

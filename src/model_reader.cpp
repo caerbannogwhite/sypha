@@ -3,82 +3,66 @@
 
 SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputFilePath)
 {
-    int currColNumber, num;
-    int lineCounter = 0;
-    int colIdx = 0;
-    int rowIdx = 0;
-    bool newRowFlag = false;
+    int i, j, idx, currColNumber, numColsAS;
+    double val;
 
     FILE *inputFileHandler = fopen(inputFilePath.c_str(), "r");
 
-    while (!feof(inputFileHandler))
+    // read number of rows and columns
+    if (!fscanf(inputFileHandler, "%d %d", &node.numRows, &node.numCols))
     {
-        // first row: number of rows and cols
-        if (lineCounter == 0)
+        perror("ERROR: readInstance on fscanf.");
+        return CODE_ERROR;
+    }
+
+    numColsAS = node.numCols + node.numRows;
+    node.h_ObjDns = (double *)calloc(node.numCols + node.numRows, sizeof(double));
+    node.h_RhsDns = (double *)calloc(node.numRows, sizeof(double));
+    node.h_MatDns = (double *)calloc(node.numRows * numColsAS, sizeof(double));
+
+    // read objective
+    for (j = 0; j < node.numCols; ++j)
+    {
+        if (!fscanf(inputFileHandler, "%lf", &val))
         {
-            if (!fscanf(inputFileHandler, "%d %d", &node.numRows, &node.numCols))
+            perror("ERROR: readInstance on fscanf.");
+            return CODE_ERROR;
+        }
+        node.h_ObjDns[j] = val;
+    }
+
+    // read rows
+    for (i = 0; i < node.numRows; ++i)
+    {
+        if (!fscanf(inputFileHandler, "%d", &currColNumber))
+        {
+            perror("ERROR: readInstance on fscanf.");
+            return CODE_ERROR;
+        }
+
+        for (j = 0; j < currColNumber; ++j)
+        {
+            if (!fscanf(inputFileHandler, "%d", &idx))
             {
                 perror("ERROR: readInstance on fscanf.");
                 return CODE_ERROR;
             }
-
-            node.h_ObjDns = (double *)calloc(node.numCols, sizeof(double));
-            node.h_MatDns = (double *)calloc(node.numRows * node.numCols, sizeof(double));
+            node.h_MatDns[i*numColsAS + idx - 1] = 1.0;
         }
-
-        // costs
-        else if ((lineCounter > 0) && (lineCounter <= node.numCols))
-        {
-            if (!fscanf(inputFileHandler, "%d", &num))
-            {
-                perror("ERROR: readInstance on fscanf.");
-                return CODE_ERROR;
-            }
-            node.h_ObjDns[colIdx++] = num;
-
-            if (lineCounter == node.numCols)
-            {
-                colIdx = 0;
-                rowIdx = 0;
-                newRowFlag = true;
-            }
-        }
-
-        // new row
-        else if (newRowFlag)
-        {
-            if (!fscanf(inputFileHandler, "%d", &currColNumber))
-            {
-                perror("ERROR: readInstance on fscanf.");
-                return CODE_ERROR;
-            }
-            newRowFlag = false;
-        }
-
-        // entries
-        else
-        {
-            // num: index of the column whose coefficient must be 1, 1 <= index <= num_cols
-            if (!fscanf(inputFileHandler, "%d", &num))
-            {
-                perror("ERROR: readInstance on fscanf.");
-                return CODE_ERROR;
-            }
-            node.h_MatDns[rowIdx * node.numCols + num - 1] = 1;
-            ++colIdx;
-
-            if (currColNumber == colIdx)
-            {
-                colIdx = 0;
-                ++rowIdx;
-                newRowFlag = true;
-            }
-        }
-
-        ++lineCounter;
     }
 
     fclose(inputFileHandler);
+
+    // add elements in S and rhs
+    for (i = 0; i < node.numRows; ++i)
+    {
+        node.h_RhsDns[i] = 1.0;
+        node.h_MatDns[i*numColsAS + node.numCols + i] = -1.0;
+    }
+
+    // update num cols
+    node.numCols = numColsAS;
+
     return CODE_SUCCESFULL;
 }
 
@@ -86,7 +70,7 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
  *  Read a Set Covering model and convert it to standard form.
  *  A | S = b 
  */
-SyphaStatus model_reader_read_scp_file_sparse(SyphaNodeSparse &node, string inputFilePath)
+SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string inputFilePath)
 {
     int i, j, idx, currColNumber;
     double val;
@@ -100,15 +84,100 @@ SyphaStatus model_reader_read_scp_file_sparse(SyphaNodeSparse &node, string inpu
         return CODE_ERROR;
     }
 
+    node.h_ObjDns = (double *)calloc(node.numCols + node.numRows, sizeof(double));
+    node.h_RhsDns = (double *)calloc(node.numRows, sizeof(double));
+
     // read objective
-    for (i = 0; i < node.numCols; ++i)
+    for (j = 0; j < node.numCols; ++j)
     {
         if (!fscanf(inputFileHandler, "%lf", &val))
         {
             perror("ERROR: readInstance on fscanf.");
             return CODE_ERROR;
         }
-        node.h_ObjDns->push_back(val);
+        node.h_ObjDns[j] = val;
+    }
+
+    // read rows
+    for (i = 0; i < node.numRows; ++i)
+    {
+        if (!fscanf(inputFileHandler, "%d", &currColNumber))
+        {
+            perror("ERROR: readInstance on fscanf.");
+            return CODE_ERROR;
+        }
+
+        for (j = 0; j < currColNumber; ++j)
+        {
+            if (!fscanf(inputFileHandler, "%d", &idx))
+            {
+                perror("ERROR: readInstance on fscanf.");
+                return CODE_ERROR;
+            }
+
+            node.h_cooMat->push_back(SyphaCOOEntry(i, idx-1, 1.0));
+        }
+        node.h_cooMat->push_back(SyphaCOOEntry(i, node.numCols+i, -1.0));
+    }
+
+    fclose(inputFileHandler);
+
+    // add S objective and right hand sides
+    for (i = 0; i < node.numRows; ++i)
+    {
+        node.h_RhsDns[i] = 1.0;
+    }
+
+    node.numCols = node.numCols + node.numRows;
+
+    /*std::cout << "mat\n";
+    for (auto it = node.h_cooMat->cbegin(); it != node.h_cooMat->cend(); ++it)
+        std::cout << (*it).row << " " << (*it).col << " " << (*it).val << std::endl;
+    std::cout << std::endl;
+
+    std::cout << "obj\n";
+    for (i = 0; i < node.numCols; ++i)
+        std::cout << node.h_ObjDns[i] << " ";
+    std::cout << std::endl << std::endl;
+
+    std::cout << "rhs\n";
+    for (i = 0; i < node.numRows; ++i)
+        std::cout << node.h_RhsDns[i] << " ";
+    std::cout << std::endl << std::endl;*/
+
+    return CODE_SUCCESFULL;
+}
+
+/**
+ *  Read a Set Covering model and convert it to standard form.
+ *  A | S = b 
+ */
+SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string inputFilePath)
+{
+    int i, j, idx, currColNumber;
+    double val;
+
+    FILE *inputFileHandler = fopen(inputFilePath.c_str(), "r");
+
+    // read number of rows and columns
+    if (!fscanf(inputFileHandler, "%d %d", &node.numRows, &node.numCols))
+    {
+        perror("ERROR: readInstance on fscanf.");
+        return CODE_ERROR;
+    }
+
+    node.h_ObjDns = (double *)calloc(node.numCols + node.numRows, sizeof(double));
+    node.h_RhsDns = (double *)calloc(node.numRows, sizeof(double));
+
+    // read objective
+    for (j = 0; j < node.numCols; ++j)
+    {
+        if (!fscanf(inputFileHandler, "%lf", &val))
+        {
+            perror("ERROR: readInstance on fscanf.");
+            return CODE_ERROR;
+        }
+        node.h_ObjDns[j] = val;
     }
 
     // read rows
@@ -141,11 +210,12 @@ SyphaStatus model_reader_read_scp_file_sparse(SyphaNodeSparse &node, string inpu
     fclose(inputFileHandler);
 
     // add S objective and right hand sides
-    for (int i = 0; i < node.numRows; ++i)
+    for (i = 0; i < node.numRows; ++i)
     {
-        node.h_ObjDns->push_back(0.0);
-        node.h_RhsDns->push_back(1.0);
+        node.h_RhsDns[i] = 1.0;
     }
+
+    node.numCols = node.numCols + node.numRows;
 
     /*std::cout << "indeces\n";
     for (auto it = node.h_csrMatIndices->cbegin(); it != node.h_csrMatIndices->cend(); ++it)
