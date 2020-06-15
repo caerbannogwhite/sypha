@@ -10,8 +10,7 @@ int main(int argc, char *argv[])
 
 	mainNode->importModel();
 	mainNode->copyModelOnDevice();
-
-
+	mainNode->solve();
 
 	double end = GetTimer();
 
