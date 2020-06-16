@@ -48,6 +48,7 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         ("seed", po::value<int>(&this->seed), "set random seed")
         ("thread", po::value<int>(&this->threadNum), "set number of thread")
         ("tol", po::value<double>(&this->PX_TOLERANCE)->default_value(1e-8), "set tolerance")
+        ("verbosity", po::value<int>(&this->verbosityLevel)->default_value(5), "set verbosity level")
         ("debug", po::value<int>(&this->DEBUG_LEVEL)->default_value(0), "set debug level");
 
         po::variables_map vm;

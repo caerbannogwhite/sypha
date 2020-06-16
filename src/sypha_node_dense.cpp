@@ -41,7 +41,7 @@ SyphaStatus SyphaNodeDense::solve()
     return CODE_SUCCESFULL;
 }
 
-SyphaStatus SyphaNodeDense::importModel()
+SyphaStatus SyphaNodeDense::readModel()
 {
     if (this->env->modelType == MODEL_TYPE_SCP)
     {

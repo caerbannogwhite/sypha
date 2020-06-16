@@ -48,7 +48,7 @@ public:
     int getNumNonZero();
     double getObjectiveValue();
     SyphaStatus solve();
-    SyphaStatus importModel();
+    SyphaStatus readModel();
     SyphaStatus copyModelOnDevice();
     SyphaStatus convert2MySimplexForm();
     SyphaStatus setInitValues();

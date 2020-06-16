@@ -11,7 +11,7 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
     // read number of rows and columns
     if (!fscanf(inputFileHandler, "%d %d", &node.numRows, &node.numCols))
     {
-        perror("ERROR: readInstance on fscanf.");
+        node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
         return CODE_ERROR;
     }
 
@@ -25,7 +25,7 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
     {
         if (!fscanf(inputFileHandler, "%lf", &val))
         {
-            perror("ERROR: readInstance on fscanf.");
+            node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
             return CODE_ERROR;
         }
         node.h_ObjDns[j] = val;
@@ -36,7 +36,7 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
     {
         if (!fscanf(inputFileHandler, "%d", &currColNumber))
         {
-            perror("ERROR: readInstance on fscanf.");
+            node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
             return CODE_ERROR;
         }
 
@@ -44,7 +44,7 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
         {
             if (!fscanf(inputFileHandler, "%d", &idx))
             {
-                perror("ERROR: readInstance on fscanf.");
+                node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
                 return CODE_ERROR;
             }
             node.h_MatDns[i*numColsAS + idx - 1] = 1.0;
@@ -80,7 +80,7 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
     // read number of rows and columns
     if (!fscanf(inputFileHandler, "%d %d", &node.numRows, &node.numCols))
     {
-        perror("ERROR: readInstance on fscanf.");
+        node.env->logger("model_reader_read_scp_file_sparse_coo: fscanf failed.", "ERROR", 0);
         return CODE_ERROR;
     }
 
@@ -92,7 +92,7 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
     {
         if (!fscanf(inputFileHandler, "%lf", &val))
         {
-            perror("ERROR: readInstance on fscanf.");
+            node.env->logger("model_reader_read_scp_file_sparse_coo: fscanf failed.", "ERROR", 0);
             return CODE_ERROR;
         }
         node.h_ObjDns[j] = val;
@@ -103,7 +103,7 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
     {
         if (!fscanf(inputFileHandler, "%d", &currColNumber))
         {
-            perror("ERROR: readInstance on fscanf.");
+            node.env->logger("model_reader_read_scp_file_sparse_coo: fscanf failed.", "ERROR", 0);
             return CODE_ERROR;
         }
 
@@ -111,7 +111,7 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
         {
             if (!fscanf(inputFileHandler, "%d", &idx))
             {
-                perror("ERROR: readInstance on fscanf.");
+                node.env->logger("model_reader_read_scp_file_sparse_coo: fscanf failed.", "ERROR", 0);
                 return CODE_ERROR;
             }
 
@@ -156,13 +156,15 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
 {
     int i, j, idx, currColNumber;
     double val;
+    char message[1024];
 
+    node.env->logger("Start scanning SCP model at " + inputFilePath, "INFO", 10);
     FILE *inputFileHandler = fopen(inputFilePath.c_str(), "r");
 
     // read number of rows and columns
     if (!fscanf(inputFileHandler, "%d %d", &node.numRows, &node.numCols))
     {
-        perror("ERROR: readInstance on fscanf.");
+        node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
         return CODE_ERROR;
     }
 
@@ -170,34 +172,38 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
     node.h_RhsDns = (double *)calloc(node.numRows, sizeof(double));
 
     // read objective
+    sprintf(message, "Original model has %d rows and %d columns", node.numRows, node.numCols);
+    node.env->logger(message, "INFO", 15);
+    node.env->logger("Start scanning model objective", "INFO", 20);
     for (j = 0; j < node.numCols; ++j)
     {
         if (!fscanf(inputFileHandler, "%lf", &val))
         {
-            perror("ERROR: readInstance on fscanf.");
+            node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
             return CODE_ERROR;
         }
         node.h_ObjDns[j] = val;
     }
 
     // read rows
-    node.h_csrMatIndPtrs->push_back(0);
+    node.env->logger("Start scanning rows", "INFO", 20);
+    node.h_csrMatOffsets->push_back(0);
     for (i = 0; i < node.numRows; ++i)
     {
         if (!fscanf(inputFileHandler, "%d", &currColNumber))
         {
-            perror("ERROR: readInstance on fscanf.");
+            node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
             return CODE_ERROR;
         }
 
         // add 1 for the element in matrix S
-        node.h_csrMatIndPtrs->push_back(node.h_csrMatIndPtrs->back() + currColNumber + 1);
+        node.h_csrMatOffsets->push_back(node.h_csrMatOffsets->back() + currColNumber + 1);
 
         for (j = 0; j < currColNumber; ++j)
         {
             if (!fscanf(inputFileHandler, "%d", &idx))
             {
-                perror("ERROR: readInstance on fscanf.");
+                node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
                 return CODE_ERROR;
             }
             node.h_csrMatIndices->push_back(idx - 1);
@@ -209,7 +215,8 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
 
     fclose(inputFileHandler);
 
-    // add S objective and right hand sides
+    node.env->logger("Adding right hand sides", "INFO", 30);
+    // set right hand sides
     for (i = 0; i < node.numRows; ++i)
     {
         node.h_RhsDns[i] = 1.0;
@@ -217,13 +224,15 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
 
     node.numCols = node.numCols + node.numRows;
 
+    node.env->logger("Successfully read SCP model", "INFO", 10);
+
     /*std::cout << "indeces\n";
     for (auto it = node.h_csrMatIndices->cbegin(); it != node.h_csrMatIndices->cend(); ++it)
         std::cout << *it << " ";
     std::cout << std::endl;
 
     std::cout << "indeces ptr\n";
-    for (auto it = node.h_csrMatIndPtrs->cbegin(); it != node.h_csrMatIndPtrs->cend(); ++it)
+    for (auto it = node.h_csrMatOffsets->cbegin(); it != node.h_csrMatOffsets->cend(); ++it)
         std::cout << *it << " ";
     std::cout << std::endl;
     
