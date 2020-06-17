@@ -9,7 +9,6 @@
 #include "common.h"
 #include "sypha_environment.h"
 #include "sypha_cuda_helper.h"
-#include "model_reader.h"
 
 class SyphaEnvironment;
 
@@ -26,26 +25,30 @@ public:
 class SyphaNodeSparse
 {
 private:
-    int numCols;
-    int numRows;
-    int numNonZero;
-    double objectiveValue;
+    int ncols;
+    int nrows;
+    int nnz;
+    double objval;
 
     vector<SyphaCOOEntry> *h_cooMat;
 
-    vector<int> *h_csrMatIndices;
-    vector<int> *h_csrMatIndPtrs;
+    vector<int> *h_csrMatInds;
+    vector<int> *h_csrMatOffs;
     vector<double> *h_csrMatVals;
     double *h_ObjDns;
     double *h_RhsDns;
 
-    int *d_csrMatIndices;
-    int *d_csrMatIndPtrs;
+    int *d_csrMatInds;
+    int *d_csrMatOffs;
     double *d_csrMatVals;
+    int *d_csrMatTransInds;
+    int *d_csrMatTransOffs;
+    double *d_csrMatTransVals;
     double *d_ObjDns;
     double *d_RhsDns;
 
     cusparseSpMatDescr_t matDescr;
+    cusparseSpMatDescr_t matTransDescr;
     cusparseDnVecDescr_t objDescr;
     cusparseDnVecDescr_t rhsDescr;
 
@@ -62,9 +65,9 @@ public:
     int getNumCols();
     int getNumRows();
     int getNumNonZero();
-    double getObjectiveValue();
+    double getObjval();
     SyphaStatus solve();
-    SyphaStatus importModel();
+    SyphaStatus readModel();
     SyphaStatus copyModelOnDevice();
     SyphaStatus setInitValues();
     SyphaStatus setUpCuda();

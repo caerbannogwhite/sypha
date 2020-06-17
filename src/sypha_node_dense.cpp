@@ -17,26 +17,27 @@ SyphaNodeDense::~SyphaNodeDense()
 
 int SyphaNodeDense::getNumCols()
 {
-    return this->numCols;
+    return this->ncols;
 }
 
 int SyphaNodeDense::getNumRows()
 {
-    return this->numRows;
+    return this->nrows;
 }
 
 int SyphaNodeDense::getNumNonZero()
 {
-    return this->numRows;
+    return this->nnz;
 }
 
-double SyphaNodeDense::getObjectiveValue()
+double SyphaNodeDense::getObjval()
 {
-    return this->objectiveValue;
+    return this->objval;
 }
 
 SyphaStatus SyphaNodeDense::solve()
 {
+    solver_dense_merhrotra(*this);
 
     return CODE_SUCCESFULL;
 }
@@ -54,16 +55,32 @@ SyphaStatus SyphaNodeDense::readModel()
 
 SyphaStatus SyphaNodeDense::copyModelOnDevice()
 {
+    checkCudaErrors(cudaMalloc((void **)&this->d_MatDns, sizeof(double) * this->nrows * this->ncols));
+    checkCudaErrors(cudaMalloc((void **)&this->d_ObjDns, sizeof(double) * this->ncols));
+    checkCudaErrors(cudaMalloc((void **)&this->d_RhsDns, sizeof(double) * this->nrows));
+
+    checkCudaErrors(cudaMemcpyAsync(this->d_MatDns, this->h_MatDns,
+                                    sizeof(double) * this->nrows * this->ncols, cudaMemcpyHostToDevice,
+                                    this->cudaStream));
+
+    checkCudaErrors(cudaMemcpyAsync(this->d_ObjDns, this->h_ObjDns,
+                                    sizeof(double) * this->ncols, cudaMemcpyHostToDevice,
+                                    this->cudaStream));
+
+    checkCudaErrors(cudaMemcpyAsync(this->d_RhsDns, this->h_RhsDns,
+                                    sizeof(double) * this->nrows, cudaMemcpyHostToDevice,
+                                    this->cudaStream));
+
     return CODE_SUCCESFULL;
 }
 
 SyphaStatus SyphaNodeDense::setInitValues()
 {
-    this->numCols = 0;
-    this->numRows = 0;
-    this->numNonZero = 0;
+    this->ncols = 0;
+    this->nrows = 0;
+    this->nnz = 0;
 
-    this->objectiveValue = 0.0;
+    this->objval = 0.0;
 
     return CODE_SUCCESFULL;
 }
@@ -73,27 +90,12 @@ SyphaStatus SyphaNodeDense::setUpCuda()
     // initialize a cuda stream for this node
     checkCudaErrors(cudaStreamCreate(&this->cudaStream));
 
-    // initialize cusolver Sparse, cusparse
-    if (this->sparse)
-    {
-        checkCudaErrors(cusolverSpCreate(&this->cusolverSpHandle));
-        checkCudaErrors(cusparseCreate(&this->cusparseHandle));
+    checkCudaErrors(cusolverDnCreate(&this->cusolverDnHandle));
+    checkCudaErrors(cublasCreate(&this->cublasHandle));
 
-        // bind stream to cusparse and cusolver
-        checkCudaErrors(cusolverSpSetStream(this->cusolverSpHandle, this->cudaStream));
-        checkCudaErrors(cusparseSetStream(this->cusparseHandle, this->cudaStream));
-    }
-
-    // initialize cusolver Dense and cublas
-    else
-    {
-        checkCudaErrors(cusolverDnCreate(&this->cusolverDnHandle));
-        checkCudaErrors(cublasCreate(&this->cublasHandle));
-
-        // bind stream to cublas and cusolver
-        checkCudaErrors(cusolverDnSetStream(this->cusolverDnHandle, this->cudaStream));
-        checkCudaErrors(cublasSetStream(this->cublasHandle, this->cudaStream));
-    }
+    // bind stream to cublas and cusolver
+    checkCudaErrors(cusolverDnSetStream(this->cusolverDnHandle, this->cudaStream));
+    checkCudaErrors(cublasSetStream(this->cublasHandle, this->cudaStream));
 
     return CODE_SUCCESFULL;
 }
