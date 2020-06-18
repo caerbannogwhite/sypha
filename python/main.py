@@ -42,7 +42,8 @@ def launch(path, instance, sparse=False):
     return flag
 
 #path = Path("C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\ex_balas1.txt")
-#launch(path, "ex_balas1")
+path = Path(f"/home/macs/coding/optimization/sypha/data/ex_balas1.txt")
+launch(path, "ex_balas1", sparse=True)
 
 counter = 0
 counter_ok = 0
@@ -56,7 +57,7 @@ for i in range(10):
     #path = Path(f"C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scp4{i+1}.txt")
     path = Path(f"/home/macs/coding/optimization/sypha/data/scp4{i+1}.txt")
     counter += 1
-    if launch(path, "scp4{:d}".format(i+1)):
+    if launch(path, "scp4{:d}".format(i+1), sparse=True):
         counter_ok += 1
 
 #for i in range(10):

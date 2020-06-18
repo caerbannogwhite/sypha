@@ -209,7 +209,7 @@ def initial_point_computation_sparse(mat: csr_matrix,
     x = mat.T.dot(AAT_inv).dot(rhs)
     y = AAT_inv.dot(mat).dot(obj)
     s = obj - mat.T.dot(y)
-    
+
     delta_x = max(-1.5 * numpy.min(x), 0.0)
     delta_s = max(-1.5 * numpy.min(s), 0.0)
 
