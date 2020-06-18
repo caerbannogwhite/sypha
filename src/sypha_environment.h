@@ -31,8 +31,9 @@ private:
     double PX_TOLERANCE;
 
     // Merhrotra parameters
-    int MERHROTRA_MAX_ITER;
-    double MERHROTRA_MU_TOL;
+    int MERHROTRA_MAX_ITER = 1000;
+    double MERHROTRA_MU_TOL = 1.E-10;
+    double MERHROTRA_CHOL_TOL = 1.E-12;
 
 public:
     SyphaEnvironment();
