@@ -37,6 +37,9 @@ private:
     vector<double> *h_csrMatVals;
     double *h_ObjDns;
     double *h_RhsDns;
+    double *h_x;
+    double *h_y;
+    double *h_s;
 
     int *d_csrMatInds;
     int *d_csrMatOffs;
@@ -46,6 +49,9 @@ private:
     double *d_csrMatTransVals;
     double *d_ObjDns;
     double *d_RhsDns;
+    double *d_x;
+    double *d_y;
+    double *d_s;
 
     cusparseSpMatDescr_t matDescr;
     cusparseSpMatDescr_t matTransDescr;
