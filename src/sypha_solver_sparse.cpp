@@ -43,7 +43,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     checkCudaErrors(cudaMalloc((void **)&node.d_y, sizeof(double) * node.nrows));
     checkCudaErrors(cudaMalloc((void **)&node.d_s, sizeof(double) * node.ncols));
 
-    solver_sparse_merhrotra_init(node);
+    solver_sparse_merhrotra_init_3(node);
 
     while ((iterations < node.env->MERHROTRA_MAX_ITER) && (mu > node.env->MERHROTRA_MU_TOL))
     {
@@ -84,7 +84,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     return CODE_SUCCESFULL;
 }
 
-SyphaStatus solver_sparse_merhrotra_init(SyphaNodeSparse &node)
+SyphaStatus solver_sparse_merhrotra_init_1(SyphaNodeSparse &node)
 {
     const int reorder = 0;
     int singularity = 0;
@@ -214,7 +214,6 @@ SyphaStatus solver_sparse_merhrotra_init(SyphaNodeSparse &node)
     std::cout << "\nAAT" << std::endl;
     std::cout << "rows: " << r << ", cols: " << c << ", num nz: " << n << std::endl;
 
-
     ///////////////////             COMPUTE s = - mat' * y + obj
     alpha = -1.0;
     beta = 1.0;
@@ -252,8 +251,6 @@ SyphaStatus solver_sparse_merhrotra_init(SyphaNodeSparse &node)
                                     node.d_s, CUDA_R_64F, CUDA_R_64F,
                                     d_buffer1));
 
-
-
     checkCudaErrors(cusparseDestroyMatDescr(AAT_descrGen));
     checkCudaErrors(cusparseDestroyMatDescr(matTransDescrGen));
     checkCudaErrors(cusparseDestroySpMat(AAT_descr));
@@ -268,202 +265,360 @@ SyphaStatus solver_sparse_merhrotra_init(SyphaNodeSparse &node)
     return CODE_SUCCESFULL;
 }
 
-// #define CHECK_CUDA(func)                                               \
-//     {                                                                  \
-//         cudaError_t status = (func);                                   \
-//         if (status != cudaSuccess)                                     \
-//         {                                                              \
-//             printf("CUDA API failed at line %d with error: %s (%d)\n", \
-//                    __LINE__, cudaGetErrorString(status), status);      \
-//             return CODE_ERROR;                                       \
-//         }                                                              \
-//     }
+SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node)
+{
+    const int reorder = 0;
+    int singularity = 0;
+    int info = 0;
+    int i = 0;
+    int I_matBytes = node.nrows * node.nrows * sizeof(double);
 
-// #define CHECK_CUSPARSE(func)                                               \
-//     {                                                                      \
-//         cusparseStatus_t status = (func);                                  \
-//         if (status != CUSPARSE_STATUS_SUCCESS)                             \
-//         {                                                                  \
-//             printf("CUSPARSE API failed at line %d with error: %s (%d)\n", \
-//                    __LINE__, cusparseGetErrorString(status), status);      \
-//             return CODE_ERROR;                                           \
-//         }                                                                  \
-//     }
+    double alpha = 1.0;
+    double beta = 0.0;
 
-// SyphaStatus solver_sparse_merhrotra_init(SyphaNodeSparse &node)
-// {
-//     // Host problem definition
-//     const int B_nrows = 5;
-//     const int B_ncols = 2;
-//     const int B_nnz = 5;
+    int *d_ipiv = NULL;
+    double *d_AAT = NULL;
+    double *d_matDn = NULL;
+    double *h_I = NULL;
 
-//     int hB_offs[] = {0, 1, 2, 3, 4, 5};
-//     int hB_inds[] = {0, 1, 0, 0, 1};
-//     double hB_vals[] = {1, 1, 1, -1, -1};
+    void *d_buffer = NULL;
+    size_t currBufferSize = 0;
+    size_t bufferSize = 0;
+    char message[1024];
 
-//     int hC_csrOffsets[] = {0, 1, 2};
-//     int hC_columns[] = {0, 1};
-//     double hC_values[] = {3, 2};
+    cusolverDnParams_t cusolverDnParams;
+    cusparseDnVecDescr_t vecX, vecY, vecS;
+    cusparseDnMatDescr_t AAT_descr, matDnDescr;
+    cusparseMatDescr_t matDescrGen;
 
-//     const int C_num_nnz = 2;
-//     double alpha = 1.0f;
-//     double beta = 0.0f;
-//     cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
-//     cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
-//     cudaDataType computeType = CUDA_R_64F;
+    node.env->logger("Merhrotra starting point computation", "INFO", 13);
+    checkCudaErrors(cusolverDnCreateParams(&cusolverDnParams));
 
-//     //--------------------------------------------------------------------------
-//     // Device memory management: Allocate and copy A, B
-//     int *dB_csrOffsets, *dB_columns;
-//     int *dC_csrOffsets, *dC_columns;
-//     double *dB_values;
-//     double *dC_values;
+    checkCudaErrors(cusparseCreateMatDescr(&matDescrGen));
+    checkCudaErrors(cusparseSetMatType(matDescrGen, CUSPARSE_MATRIX_TYPE_GENERAL));
+    checkCudaErrors(cusparseSetMatIndexBase(matDescrGen, CUSPARSE_INDEX_BASE_ZERO));
 
-//     // allocate B
-//     CHECK_CUDA(cudaMalloc((void **)&dB_csrOffsets, (B_nrows + 1) * sizeof(int)))
-//     CHECK_CUDA(cudaMalloc((void **)&dB_columns, B_nnz * sizeof(int)))
-//     CHECK_CUDA(cudaMalloc((void **)&dB_values, B_nnz * sizeof(double)))
-//     // allocate C offsets
-//     CHECK_CUDA(cudaMalloc((void **)&dC_csrOffsets, (node.nrows + 1) * sizeof(int)))
-//     // copy B
-//     CHECK_CUDA(cudaMemcpy(dB_csrOffsets, hB_offs,
-//                           (B_nrows + 1) * sizeof(int),
-//                           cudaMemcpyHostToDevice))
-//     CHECK_CUDA(cudaMemcpy(dB_columns, hB_inds, B_nnz * sizeof(int),
-//                           cudaMemcpyHostToDevice))
-//     CHECK_CUDA(cudaMemcpy(dB_values, hB_vals,
-//                           B_nnz * sizeof(double), cudaMemcpyHostToDevice))
-//     //--------------------------------------------------------------------------
-//     // CUSPARSE APIs
-//     cusparseHandle_t handle = NULL;
-//     cusparseSpMatDescr_t matB, matC;
-//     void *dBuffer1 = NULL, *dBuffer2 = NULL;
-//     size_t bufferSize1 = 0, bufferSize2 = 0;
-//     CHECK_CUSPARSE(cusparseCreate(&handle))
+    checkCudaErrors(cusparseCreateDnVec(&vecX, (int64_t)node.ncols,
+                                        node.d_x, CUDA_R_64F));
 
-//     CHECK_CUSPARSE(cusparseCreateCsr(&matB, B_nrows, B_ncols, B_nnz,
-//                                      //dB_csrOffsets, dB_columns, dB_values,
-//                                      dB_csrOffsets, node.d_csrMatTransInds, node.d_csrMatTransVals,
-//                                      CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
-//                                      CUSPARSE_INDEX_BASE_ZERO, computeType))
-//     CHECK_CUSPARSE(cusparseCreateCsr(&matC, node.nrows, node.nrows, 0,
-//                                      NULL, NULL, NULL,
-//                                      CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
-//                                      CUSPARSE_INDEX_BASE_ZERO, computeType))
+    checkCudaErrors(cusparseCreateDnVec(&vecY, (int64_t)node.nrows,
+                                        node.d_y, CUDA_R_64F));
 
-//     //--------------------------------------------------------------------------
-//     // SpGEMM Computation
-//     cusparseSpGEMMDescr_t spgemmDesc;
-//     CHECK_CUSPARSE(cusparseSpGEMM_createDescr(&spgemmDesc))
-//     // ask bufferSize1 bytes for external memory
-//     cusparseSpGEMM_workEstimation(handle, opA, opB,
-//                                   &alpha, node.matDescr, node.matTransDescr, &beta, matC,
-//                                   computeType, CUSPARSE_SPGEMM_DEFAULT,
-//                                   spgemmDesc, &bufferSize1, NULL);
+    checkCudaErrors(cusparseCreateDnVec(&vecS, (int64_t)node.ncols,
+                                        node.d_s, CUDA_R_64F));
 
-//     cudaMalloc((void **)&dBuffer1, bufferSize1);
-//     // inspect the matrices A and B to understand the memory requiremnent for
-//     // the next step
+    checkCudaErrors(cudaMalloc((void **)&d_AAT, sizeof(double) * node.nrows * node.nrows));
+    checkCudaErrors(cudaMalloc((void **)&d_matDn, sizeof(double) * node.nrows * node.ncols));
 
-//     cusparseSpGEMM_workEstimation(handle, opA, opB,
-//                                   &alpha, node.matDescr, node.matTransDescr, &beta, matC,
-//                                   computeType, CUSPARSE_SPGEMM_DEFAULT,
-//                                   spgemmDesc, &bufferSize1, dBuffer1);
-//     // ask bufferSize2 bytes for external memory
-//     cusparseSpGEMM_compute(handle, opA, opB,
-//                            &alpha, node.matDescr, node.matTransDescr, &beta, matC,
-//                            computeType, CUSPARSE_SPGEMM_DEFAULT,
-//                            spgemmDesc, &bufferSize2, NULL);
-//     cudaMalloc((void **)&dBuffer2, bufferSize2);
-//     // compute the intermediate product of A * B
-//     cusparseSpGEMM_compute(handle, opA, opB,
-//                            &alpha, node.matDescr, node.matTransDescr, &beta, matC,
-//                            computeType, CUSPARSE_SPGEMM_DEFAULT,
-//                            spgemmDesc, &bufferSize2, dBuffer2);
+    checkCudaErrors(cusparseCreateDnMat(&AAT_descr, (int64_t)node.nrows, (int64_t)node.nrows,
+                                        (int64_t)node.nrows, d_AAT, CUDA_R_64F,
+                                        CUSPARSE_ORDER_COL));
 
-//     // get matrix C non-zero entries C_num_nnz1
-//     int64_t C_num_rows1, C_num_cols1, C_num_nnz1;
-//     cusparseSpMatGetSize(matC, &C_num_rows1, &C_num_cols1, &C_num_nnz1);
-//     // allocate matrix C
-//     cudaMalloc((void **)&dC_columns, C_num_nnz1 * sizeof(int));
-//     cudaMalloc((void **)&dC_values, C_num_nnz1 * sizeof(double));
-//     // update matC with the new pointers
-//     cusparseCsrSetPointers(matC, dC_csrOffsets, dC_columns, dC_values);
-//     // copy the final products to the matrix C
-//     cusparseSpGEMM_copy(handle, opA, opB,
-//                         &alpha, node.matDescr, matB, &beta, matC,
-//                         computeType, CUSPARSE_SPGEMM_DEFAULT, spgemmDesc);
+    checkCudaErrors(cusparseCreateDnMat(&matDnDescr, (int64_t)node.nrows, (int64_t)node.ncols,
+                                        (int64_t)node.nrows, d_matDn, CUDA_R_64F,
+                                        CUSPARSE_ORDER_COL));
 
-//     int64_t r, c, n;
+    ///////////////////             STORE MATRIX IN DENSE FORMAT
+    node.env->logger("solver_sparse_merhrotra_init - storing matrix in dense format", "INFO", 20);
+    checkCudaErrors(cusparseDcsr2dense(node.cusparseHandle, node.nrows, node.ncols,
+                                       matDescrGen, // CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO
+                                       node.d_csrMatVals, node.d_csrMatOffs, node.d_csrMatInds,
+                                       d_matDn, node.nrows));
 
-//     cusparseSpMatGetSize(node.matDescr, &r, &c, &n);
-//     std::cout << "\nMat" << std::endl;
-//     std::cout << "rows: " << r << ", cols: " << c << ", num nz: " << n << std::endl;
-//     cusparseSpMatGetSize(node.matTransDescr, &r, &c, &n);
-//     std::cout << "\nTrans" << std::endl;
-//     std::cout << "rows: " << r << ", cols: " << c << ", num nz: " << n << std::endl;
-//     cusparseSpMatGetSize(matC, &r, &c, &n);
-//     std::cout << "\nAAT" << std::endl;
-//     std::cout << "rows: " << r << ", cols: " << c << ", num nz: " << n << std::endl;
+    ///////////////////             COMPUTE AAT INVERSE MATRIX
 
-//     // destroy matrix/vector descriptors
-//     CHECK_CUSPARSE(cusparseSpGEMM_destroyDescr(spgemmDesc))
-//     //CHECK_CUSPARSE(cusparseDestroySpMat(matB))
-//     CHECK_CUSPARSE(cusparseDestroySpMat(matC))
-//     CHECK_CUSPARSE(cusparseDestroy(handle))
+    // GEMM Computation: MATRIX * MATRIX'
+    node.env->logger("solver_sparse_merhrotra_init - computing mat * mat'", "INFO", 20);
+    checkCudaErrors(cusparseSpMM_bufferSize(node.cusparseHandle,
+                                            CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                            CUSPARSE_OPERATION_TRANSPOSE,
+                                            &alpha, node.matDescr, matDnDescr,
+                                            &beta, AAT_descr,
+                                            CUDA_R_64F,
+                                            CUSPARSE_CSRMM_ALG1,
+                                            &bufferSize));
 
-//     //--------------------------------------------------------------------------
-//     // device result check
-//     int hC_csrOffsets_tmp[node.nrows + 1];
-//     int hC_columns_tmp[C_num_nnz];
-//     double hC_values_tmp[C_num_nnz];
-//     CHECK_CUDA(cudaMemcpy(hC_csrOffsets_tmp, dC_csrOffsets,
-//                           (node.nrows + 1) * sizeof(int),
-//                           cudaMemcpyDeviceToHost))
-//     CHECK_CUDA(cudaMemcpy(hC_columns_tmp, dC_columns,
-//                           C_num_nnz * sizeof(int),
-//                           cudaMemcpyDeviceToHost))
-//     CHECK_CUDA(cudaMemcpy(hC_values_tmp, dC_values,
-//                           C_num_nnz * sizeof(double),
-//                           cudaMemcpyDeviceToHost))
-//     int correct = 1;
-//     for (int i = 0; i < node.nrows + 1; i++)
-//     {
-//         if (hC_csrOffsets_tmp[i] != hC_csrOffsets[i])
-//         {
-//             correct = 0;
-//             break;
-//         }
-//     }
+    // allocate memory for computation
+    currBufferSize = bufferSize > I_matBytes ? bufferSize : I_matBytes;
+    checkCudaErrors(cudaMalloc((void **)&d_buffer, currBufferSize));
 
-//     printf("\nBuff size 1: %lu\nBuff size 2: %lu\n", bufferSize1, bufferSize2);
-//     printf("C values:\n");
-//     for (int i = 0; i < C_num_nnz; i++)
-//     {
-//         if (hC_columns_tmp[i] != hC_columns[i] ||
-//             hC_values_tmp[i] != hC_values[i])
-//         {
-//             correct = 0;
-//             break;
-//         }
-//         printf("%.1f ", hC_values_tmp[i]);
-//     }
-//     printf("\n");
+    checkCudaErrors(cusparseSpMM(node.cusparseHandle,
+                                 CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                 CUSPARSE_OPERATION_TRANSPOSE,
+                                 &alpha, node.matDescr, matDnDescr,
+                                 &beta, AAT_descr,
+                                 CUDA_R_64F,
+                                 CUSPARSE_CSRMM_ALG1,
+                                 d_buffer));
 
-//     if (correct)
-//         printf("spgemm_example test PASSED\n");
-//     else
-//     {
-//         printf("spgemm_example test FAILED: wrong result\n");
-//         return CODE_ERROR;
-//     }
-//     //--------------------------------------------------------------------------
-//     // device memory deallocation
-//     CHECK_CUDA(cudaFree(dBuffer1))
-//     CHECK_CUDA(cudaFree(dBuffer2))
-//     CHECK_CUDA(cudaFree(dC_csrOffsets))
-//     CHECK_CUDA(cudaFree(dC_columns))
-//     CHECK_CUDA(cudaFree(dC_values))
+    ///////////////////             MATRIX INVERSION
 
-//     return CODE_SUCCESFULL;
-// }
+    node.env->logger("solver_sparse_merhrotra_init - computing matrix inversion", "INFO", 20);
+    // See https://stackoverflow.com/questions/50892906/what-is-the-most-efficient-way-to-compute-the-inverse-of-a-general-matrix-using
+    checkCudaErrors(cusolverDnDgetrf_bufferSize(node.cusolverDnHandle,
+                                                node.nrows, node.nrows,
+                                                d_AAT, node.nrows,
+                                                (int *)&bufferSize));
+
+    // allocate memory for computation
+    if (bufferSize > currBufferSize)
+    {
+        currBufferSize = bufferSize;
+        checkCudaErrors(cudaMalloc((void **)&d_buffer, currBufferSize));
+    }
+    checkCudaErrors(cudaMalloc((void **)&d_ipiv, sizeof(int) * node.nrows));
+
+    /*checkCudaErrors(cusolverDnDgetrf(node.cusolverDnHandle,
+                                     node.nrows, node.nrows,
+                                     d_AAT, node.nrows,
+                                     (double *)d_buffer, d_ipiv,
+                                     &info));*/
+
+    printf("AAT after getrf\n");
+    utils_printDmat(node.nrows, node.nrows, node.nrows, d_AAT, true);
+
+    sprintf(message, "solver_sparse_merhrotra_init - cusolverDnGetrf returned %d", info);
+    node.env->logger(message, "INFO", 20);
+
+    // set I matrix
+    h_I = (double *)calloc(node.nrows * node.nrows, sizeof(double));
+    for (i = 0; i < node.nrows; ++i)
+    {
+        h_I[node.nrows * i + i] = 1.0;
+    }
+    //checkCudaErrors(cudaMemcpyAsync(d_buffer, h_I, sizeof(double) * node.nrows * node.nrows, cudaMemcpyHostToDevice, node.cudaStream));
+    //checkCudaErrors(cudaMemcpy(d_buffer, h_I, sizeof(double) * node.nrows * node.nrows, cudaMemcpyHostToDevice));
+    free(h_I);
+
+    checkCudaErrors(cusolverDnDgetrs(node.cusolverDnHandle, CUBLAS_OP_N,
+                                     node.nrows, node.nrows,
+                                     d_AAT, node.nrows,
+                                     d_ipiv,
+                                     (double *)d_buffer, node.nrows,
+                                     &info));
+
+    printf("AAT after getrs\n");
+    utils_printDmat(node.nrows, node.nrows, node.nrows, d_AAT, true);
+
+    sprintf(message, "solver_sparse_merhrotra_init - cusolverDnGetrs returned %d", info);
+    node.env->logger(message, "INFO", 20);
+
+    /*void *d_b, *d_x;
+    checkCudaErrors(cudaMalloc((void **)&d_b, AAT_nrows*sizeof(double)));
+    checkCudaErrors(cudaMalloc((void **)&d_x, AAT_nrows*sizeof(double)));
+
+    checkCudaErrors(cusolverSpDcsrlsvchol(
+        node.cusolverSpHandle, AAT_nrows, AAT_nnz,
+        matDescrGen, AAT_vals, AAT_offs, AAT_inds,
+        (double*)d_b, node.env->MERHROTRA_CHOL_TOL, reorder, (double*)d_x, &singularity));
+
+    checkCudaErrors(cudaFree(d_b));
+    checkCudaErrors(cudaFree(d_x));*/
+
+    ///////////////////             COMPUTE s = - mat' * y + obj
+    node.env->logger("solver_sparse_merhrotra_init - computing s = - mat' * y + obj", "INFO", 20);
+    alpha = -1.0;
+    beta = 1.0;
+
+    // copy obj on s
+    checkCudaErrors(cudaMemcpyAsync(node.d_s, node.d_ObjDns, sizeof(double) * node.ncols,
+                                    cudaMemcpyDeviceToDevice, node.cudaStream));
+
+    checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle,
+                                            CUSPARSE_OPERATION_TRANSPOSE,
+                                            &alpha, node.matDescr, vecY,
+                                            &beta, vecS,
+                                            CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                                            &bufferSize));
+
+    if (bufferSize > currBufferSize)
+    {
+        currBufferSize = bufferSize;
+        checkCudaErrors(cudaMalloc((void **)&d_buffer, currBufferSize));
+    }
+    checkCudaErrors(cudaDeviceSynchronize());
+
+    checkCudaErrors(cusparseSpMV(node.cusparseHandle,
+                                 CUSPARSE_OPERATION_TRANSPOSE,
+                                 &alpha, node.matDescr, vecY,
+                                 &beta, vecS,
+                                 CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                                 d_buffer));
+
+    ///////////////////             FREE RESOURCES
+    checkCudaErrors(cusolverDnDestroyParams(cusolverDnParams));
+
+    checkCudaErrors(cusparseDestroyMatDescr(matDescrGen));
+    checkCudaErrors(cusparseDestroyDnMat(AAT_descr));
+
+    checkCudaErrors(cusparseDestroyDnVec(vecX));
+    checkCudaErrors(cusparseDestroyDnVec(vecY));
+    checkCudaErrors(cusparseDestroyDnVec(vecS));
+
+    checkCudaErrors(cudaFree(d_ipiv));
+    checkCudaErrors(cudaFree(d_buffer));
+
+    checkCudaErrors(cudaFree(d_AAT));
+    checkCudaErrors(cudaFree(d_matDn));
+
+    return CODE_SUCCESFULL;
+}
+
+SyphaStatus solver_sparse_merhrotra_init_3(SyphaNodeSparse &node)
+{
+    const int reorder = 0;
+    int singularity = 0;
+    int info = 0;
+    int i = 0;
+    int I_matBytes = node.nrows * node.nrows * sizeof(double);
+
+    double alpha = 1.0;
+    double beta = 0.0;
+
+    int *d_ipiv = NULL;
+    double *d_AAT = NULL;
+    double *d_matDn = NULL;
+    double *h_I = NULL;
+
+    void *d_buffer = NULL;
+    size_t currBufferSize = 0;
+    size_t bufferSize = 0;
+    char message[1024];
+
+    cusolverDnParams_t cusolverDnParams;
+    cusparseDnVecDescr_t vecX, vecY, vecS;
+    cusparseDnMatDescr_t AAT_descr, matDnDescr;
+    cusparseMatDescr_t matDescrGen;
+
+    node.env->logger("Merhrotra starting point computation", "INFO", 13);
+    checkCudaErrors(cusolverDnCreateParams(&cusolverDnParams));
+
+    checkCudaErrors(cusparseCreateMatDescr(&matDescrGen));
+    checkCudaErrors(cusparseSetMatType(matDescrGen, CUSPARSE_MATRIX_TYPE_GENERAL));
+    checkCudaErrors(cusparseSetMatIndexBase(matDescrGen, CUSPARSE_INDEX_BASE_ZERO));
+
+    checkCudaErrors(cusparseCreateDnVec(&vecX, (int64_t)node.ncols,
+                                        node.d_x, CUDA_R_64F));
+
+    checkCudaErrors(cusparseCreateDnVec(&vecY, (int64_t)node.nrows,
+                                        node.d_y, CUDA_R_64F));
+
+    checkCudaErrors(cusparseCreateDnVec(&vecS, (int64_t)node.ncols,
+                                        node.d_s, CUDA_R_64F));
+
+    checkCudaErrors(cudaMalloc((void **)&d_AAT, sizeof(double) * node.nrows * node.nrows));
+    checkCudaErrors(cudaMalloc((void **)&d_matDn, sizeof(double) * node.nrows * node.ncols));
+
+    checkCudaErrors(cusparseCreateDnMat(&AAT_descr, (int64_t)node.nrows, (int64_t)node.nrows,
+                                        (int64_t)node.nrows, d_AAT, CUDA_R_64F,
+                                        CUSPARSE_ORDER_COL));
+
+    checkCudaErrors(cusparseCreateDnMat(&matDnDescr, (int64_t)node.nrows, (int64_t)node.ncols,
+                                        (int64_t)node.nrows, d_matDn, CUDA_R_64F,
+                                        CUSPARSE_ORDER_COL));
+
+    ///////////////////             STORE MATRIX IN DENSE FORMAT
+    node.env->logger("solver_sparse_merhrotra_init - storing matrix in dense format", "INFO", 20);
+    checkCudaErrors(cusparseDcsr2dense(node.cusparseHandle, node.nrows, node.ncols,
+                                       matDescrGen, // CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO
+                                       node.d_csrMatVals, node.d_csrMatOffs, node.d_csrMatInds,
+                                       d_matDn, node.nrows));
+
+    ///////////////////             COMPUTE AAT INVERSE MATRIX
+
+    // GEMM Computation: MATRIX * MATRIX'
+    node.env->logger("solver_sparse_merhrotra_init - computing mat * mat'", "INFO", 20);
+    checkCudaErrors(cusparseSpMM_bufferSize(node.cusparseHandle,
+                                            CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                            CUSPARSE_OPERATION_TRANSPOSE,
+                                            &alpha, node.matDescr, matDnDescr,
+                                            &beta, AAT_descr,
+                                            CUDA_R_64F,
+                                            CUSPARSE_CSRMM_ALG1,
+                                            &bufferSize));
+
+    // allocate memory for computation
+    currBufferSize = bufferSize > I_matBytes ? bufferSize : I_matBytes;
+    checkCudaErrors(cudaMalloc((void **)&d_buffer, currBufferSize));
+
+    checkCudaErrors(cusparseSpMM(node.cusparseHandle,
+                                 CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                 CUSPARSE_OPERATION_TRANSPOSE,
+                                 &alpha, node.matDescr, matDnDescr,
+                                 &beta, AAT_descr,
+                                 CUDA_R_64F,
+                                 CUSPARSE_CSRMM_ALG1,
+                                 d_buffer));
+
+    ///////////////////             MATRIX INVERSION
+
+    node.env->logger("solver_sparse_merhrotra_init - computing matrix inversion", "INFO", 20);
+    
+    int signum;
+    gsl_permutation *p = gsl_permutation_alloc((size_t) node.nrows);
+    gsl_matrix *lu = gsl_matrix_alloc((size_t) node.nrows, (size_t) node.nrows);
+    gsl_matrix *inv = gsl_matrix_alloc((size_t)node.nrows, (size_t)node.nrows);
+    
+    checkCudaErrors(cudaMemcpy(lu->data, d_AAT, sizeof(double) * node.nrows * node.nrows, cudaMemcpyDeviceToHost));
+
+    //utils_printDmat(node.nrows, node.nrows, node.nrows, lu->data, false);
+
+    gsl_linalg_LU_decomp(lu, p, &signum);
+    gsl_linalg_LU_invert(lu, p, inv);
+
+    //printf("INV:\n");
+    //utils_printDmat(node.nrows, node.nrows, node.nrows, inv->data, false);
+
+    gsl_permutation_free(p);
+    gsl_matrix_free(lu);
+    gsl_matrix_free(inv);
+
+
+    ///////////////////             COMPUTE s = - mat' * y + obj
+    node.env->logger("solver_sparse_merhrotra_init - computing s = - mat' * y + obj", "INFO", 20);
+    alpha = -1.0;
+    beta = 1.0;
+
+    // copy obj on s
+    checkCudaErrors(cudaMemcpyAsync(node.d_s, node.d_ObjDns, sizeof(double) * node.ncols,
+                                    cudaMemcpyDeviceToDevice, node.cudaStream));
+
+    checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle,
+                                            CUSPARSE_OPERATION_TRANSPOSE,
+                                            &alpha, node.matDescr, vecY,
+                                            &beta, vecS,
+                                            CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                                            &bufferSize));
+
+    if (bufferSize > currBufferSize)
+    {
+        currBufferSize = bufferSize;
+        checkCudaErrors(cudaMalloc((void **)&d_buffer, currBufferSize));
+    }
+    checkCudaErrors(cudaDeviceSynchronize());
+
+    checkCudaErrors(cusparseSpMV(node.cusparseHandle,
+                                 CUSPARSE_OPERATION_TRANSPOSE,
+                                 &alpha, node.matDescr, vecY,
+                                 &beta, vecS,
+                                 CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                                 d_buffer));
+
+    ///////////////////             FREE RESOURCES
+    checkCudaErrors(cusolverDnDestroyParams(cusolverDnParams));
+
+    checkCudaErrors(cusparseDestroyMatDescr(matDescrGen));
+    checkCudaErrors(cusparseDestroyDnMat(AAT_descr));
+
+    checkCudaErrors(cusparseDestroyDnVec(vecX));
+    checkCudaErrors(cusparseDestroyDnVec(vecY));
+    checkCudaErrors(cusparseDestroyDnVec(vecS));
+
+    checkCudaErrors(cudaFree(d_ipiv));
+    checkCudaErrors(cudaFree(d_buffer));
+
+    checkCudaErrors(cudaFree(d_AAT));
+    checkCudaErrors(cudaFree(d_matDn));
+
+    return CODE_SUCCESFULL;
+}
