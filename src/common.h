@@ -2,6 +2,7 @@
 #define COMMON_H
 
 #include <boost/program_options.hpp>
+#include <algorithm>
 #include <iostream>
 #include <math.h>
 #include <stdlib.h>

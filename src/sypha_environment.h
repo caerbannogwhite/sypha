@@ -53,7 +53,7 @@ public:
     friend SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_merhrotra_init_1(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_merhrotra_init_3(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_merhrotra_init_gsl(SyphaNodeSparse &node);
 };
 
 #endif // SYPHA_ENVIRONMENT_H

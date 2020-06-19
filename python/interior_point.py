@@ -113,6 +113,7 @@ def mehrotra_linopt_dense(mat: numpy.array,
         S_inv = numpy.linalg.inv(S)
         D = X.dot(S_inv)
         ADA = mat.dot(D.dot(mat.T))
+        
         # affine step
         delta_y_aff = numpy.linalg.solve(ADA, -r_b - mat.dot(D).dot(r_c) + mat.dot(S_inv.dot(r_xs)))
         delta_s_aff = -r_c - mat.T.dot(delta_y_aff)
