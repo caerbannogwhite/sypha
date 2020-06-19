@@ -3,83 +3,241 @@
 
 SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
 {
+    const int reorder = 0;
+    int singularity = 0;
+
     int i = 0, j = 0, k = 0, iterations = 0;
     size_t bufferSize = 0;
     double mu = 0.0;
     void *d_buffer = NULL;
+    char message[1024];
+
+    cusparseMatDescr_t A_descr;
 
     ///////////////////             GET TRANSPOSED MATRIX
-    checkCudaErrors(cudaMalloc((void **)&node.d_csrMatTransOffs, sizeof(int) * (node.ncols + 1)));
-    checkCudaErrors(cudaMalloc((void **)&node.d_csrMatTransInds, sizeof(int) * node.nnz));
-    checkCudaErrors(cudaMalloc((void **)&node.d_csrMatTransVals, sizeof(double) * node.nnz));
+    // checkCudaErrors(cudaMalloc((void **)&node.d_csrMatTransOffs, sizeof(int) * (node.ncols + 1)));
+    // checkCudaErrors(cudaMalloc((void **)&node.d_csrMatTransInds, sizeof(int) * node.nnz));
+    // checkCudaErrors(cudaMalloc((void **)&node.d_csrMatTransVals, sizeof(double) * node.nnz));
 
-    checkCudaErrors(cudaDeviceSynchronize());
+    // checkCudaErrors(cudaDeviceSynchronize());
 
-    checkCudaErrors(cusparseCsr2cscEx2_bufferSize(node.cusparseHandle, node.nrows, node.ncols, node.nnz,
-                                                  node.d_csrMatVals, node.d_csrMatOffs, node.d_csrMatInds,
-                                                  node.d_csrMatTransVals, node.d_csrMatTransOffs, node.d_csrMatTransInds,
-                                                  CUDA_R_64F, CUSPARSE_ACTION_NUMERIC,
-                                                  CUSPARSE_INDEX_BASE_ZERO, CUSPARSE_CSR2CSC_ALG2,
-                                                  &bufferSize));
+    // checkCudaErrors(cusparseCsr2cscEx2_bufferSize(node.cusparseHandle, node.nrows, node.ncols, node.nnz,
+    //                                               node.d_csrMatVals, node.d_csrMatOffs, node.d_csrMatInds,
+    //                                               node.d_csrMatTransVals, node.d_csrMatTransOffs, node.d_csrMatTransInds,
+    //                                               CUDA_R_64F, CUSPARSE_ACTION_NUMERIC,
+    //                                               CUSPARSE_INDEX_BASE_ZERO, CUSPARSE_CSR2CSC_ALG2,
+    //                                               &bufferSize));
 
-    checkCudaErrors(cudaMalloc((void **)&d_buffer, bufferSize));
+    // checkCudaErrors(cudaMalloc((void **)&d_buffer, bufferSize));
 
-    checkCudaErrors(cusparseCsr2cscEx2(node.cusparseHandle, node.nrows, node.ncols, node.nnz,
-                                       node.d_csrMatVals, node.d_csrMatOffs, node.d_csrMatInds,
-                                       node.d_csrMatTransVals, node.d_csrMatTransOffs, node.d_csrMatTransInds,
-                                       CUDA_R_64F, CUSPARSE_ACTION_NUMERIC,
-                                       CUSPARSE_INDEX_BASE_ZERO, CUSPARSE_CSR2CSC_ALG2,
-                                       d_buffer));
+    // checkCudaErrors(cusparseCsr2cscEx2(node.cusparseHandle, node.nrows, node.ncols, node.nnz,
+    //                                    node.d_csrMatVals, node.d_csrMatOffs, node.d_csrMatInds,
+    //                                    node.d_csrMatTransVals, node.d_csrMatTransOffs, node.d_csrMatTransInds,
+    //                                    CUDA_R_64F, CUSPARSE_ACTION_NUMERIC,
+    //                                    CUSPARSE_INDEX_BASE_ZERO, CUSPARSE_CSR2CSC_ALG2,
+    //                                    d_buffer));
 
-    checkCudaErrors(cusparseCreateCsr(&node.matTransDescr, node.ncols, node.nrows, node.nnz,
-                                      //node.d_csrMatTransVals, node.d_csrMatTransOffs, node.d_csrMatTransInds,
-                                      node.d_csrMatTransOffs, node.d_csrMatTransInds, node.d_csrMatTransVals,
-                                      CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
-                                      CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
+    // checkCudaErrors(cusparseCreateCsr(&node.matTransDescr, node.ncols, node.nrows, node.nnz,
+    //                                   //node.d_csrMatTransVals, node.d_csrMatTransOffs, node.d_csrMatTransInds,
+    //                                   node.d_csrMatTransOffs, node.d_csrMatTransInds, node.d_csrMatTransVals,
+    //                                   CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
+    //                                   CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
 
     ///////////////////             GET STARTING POINT
     // initialise x, y, s
-    checkCudaErrors(cudaMalloc((void **)&node.d_x, sizeof(double) * node.ncols));
-    checkCudaErrors(cudaMalloc((void **)&node.d_y, sizeof(double) * node.nrows));
-    checkCudaErrors(cudaMalloc((void **)&node.d_s, sizeof(double) * node.ncols));
-
-    solver_sparse_merhrotra_init_3(node);
-
-    while ((iterations < node.env->MERHROTRA_MAX_ITER) && (mu > node.env->MERHROTRA_MU_TOL))
-    {
-
-        ++iterations;
-    }
-
     node.h_x = (double *)malloc(sizeof(double) * node.ncols);
     node.h_y = (double *)malloc(sizeof(double) * node.nrows);
     node.h_s = (double *)malloc(sizeof(double) * node.ncols);
 
-    checkCudaErrors(cudaMemcpyAsync(node.h_x, node.d_x, sizeof(double) * node.ncols, cudaMemcpyDeviceToHost, node.cudaStream));
-    checkCudaErrors(cudaMemcpyAsync(node.h_y, node.d_y, sizeof(double) * node.nrows, cudaMemcpyDeviceToHost, node.cudaStream));
-    checkCudaErrors(cudaMemcpyAsync(node.h_s, node.d_s, sizeof(double) * node.ncols, cudaMemcpyDeviceToHost, node.cudaStream));
+    solver_sparse_merhrotra_init_gsl(node);
+
+
+    ///////////////////             SET BIG MATRIX ON HOST
+    //
+    // On each step we solve this linear system twice:
+    //
+    //      O | A' | I    x    -rc
+    //      --|----|---   -    ---
+    //      A | O  | O  * y  = -rb
+    //      --|----|---   -    ---
+    //      S | O  | X    s    -rxs
+    //
+    // Where A is the model matrix (standard form), I is the n*n identity
+    // matrix, S is the n*n s diagonal matrix, X is the n*n diagonal matrix.
+    // Total number of non-zero elements is A.nnz * 2 + n * 3
+
+    int A_nrows = node.ncols * 2 + node.nrows;
+    int A_ncols = A_nrows;
+    int A_nnz = node.nnz * 2 + node.ncols * 3;
+    
+    int *h_csrAInds = NULL;
+    int *h_csrAOffs = NULL;
+    double *h_csrAVals = NULL;
+
+    int *d_csrAInds = NULL;
+    int *d_csrAOffs = NULL;
+    double *d_csrAVals = NULL;
+
+    double *d_rhs = NULL;
+    double *d_sol = NULL;
+
+    h_csrAInds = (int *)calloc(sizeof(int), A_nnz);
+    h_csrAOffs = (int *)calloc(sizeof(int), (A_nrows + 1));
+    h_csrAVals = (double *)calloc(sizeof(double), A_nnz);
+
+    sprintf(message, "Initialising matrix: %d rows, %d columns, %d non zeros", A_nrows, A_ncols, A_nnz);
+    node.env->logger(message, "INFO", 17);
+
+    // Instantiate the first group of n rows: O | A' | I
+    bool found = false;
+    int off = 0, rowCnt = 0;
+
+    h_csrAOffs[0] = 0;
+    for (j = 0; j < node.ncols; ++j)
+    {
+        rowCnt = 0;
+        for (i = 0; i < node.nrows; ++i)
+        {
+            found = false;
+            for (k = node.h_csrMatOffs->data()[i]; k < node.h_csrMatOffs->data()[i+1]; ++k)
+            {
+                if (node.h_csrMatInds->data()[k] == j)
+                {
+                    found = true;
+                    break;
+                }
+            }
+
+            if (found)
+            {
+                h_csrAInds[off] = node.ncols + i;
+                h_csrAVals[off] = node.h_csrMatVals->data()[k];
+                ++rowCnt;
+                ++off;
+            }
+        }
+
+        // append the I matrix element for the current row
+        h_csrAInds[off] = node.ncols + node.nrows + j;
+        h_csrAVals[off] = 1.0;
+        ++rowCnt;
+        ++off;
+
+        h_csrAOffs[j + 1] = h_csrAOffs[j] + rowCnt;
+    }
+
+    // Instantiate the second group of m rows: A | O | O
+    for (i = 0; i < node.nrows; ++i)
+    {
+        h_csrAOffs[node.ncols + i + 1] = h_csrAOffs[node.ncols + i] + (node.h_csrMatOffs->data()[i + 1] - node.h_csrMatOffs->data()[i]);
+    }
+    memcpy(&h_csrAInds[off], node.h_csrMatInds->data(), sizeof(int) * node.nnz);
+    memcpy(&h_csrAVals[off], node.h_csrMatVals->data(), sizeof(double) * node.nnz);
+    off += node.nnz;
+
+    // Instantiate the third group of n rows: S | O | X
+    for (j = 0; j < node.ncols; ++j)
+    {
+        // s
+        h_csrAInds[off] = j;
+        h_csrAVals[off] = node.h_s[j];
+        ++off;
+
+        // x
+        h_csrAInds[off] = node.ncols + node.nrows + j;
+        h_csrAVals[off] = node.h_x[j];
+        ++off;
+
+        h_csrAOffs[node.ncols + node.nrows + j + 1] = h_csrAOffs[node.ncols + node.nrows + j] + 2;
+    }
+
+    checkCudaErrors(cudaMalloc((void **)&d_csrAInds, sizeof(int) * A_nnz));
+    checkCudaErrors(cudaMalloc((void **)&d_csrAOffs, sizeof(int) * (A_nrows + 1)));
+    checkCudaErrors(cudaMalloc((void **)&d_csrAVals, sizeof(double) * A_nnz));
+
+    checkCudaErrors(cudaMemcpy(d_csrAInds, h_csrAInds, sizeof(int) * A_nnz, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_csrAOffs, h_csrAOffs, sizeof(int) * (A_nrows + 1), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_csrAVals, h_csrAVals, sizeof(double) * A_nnz, cudaMemcpyHostToDevice));
+    
+    checkCudaErrors(cusparseCreateMatDescr(&A_descr));
+    checkCudaErrors(cusparseSetMatType(A_descr, CUSPARSE_MATRIX_TYPE_GENERAL));
+    checkCudaErrors(cusparseSetMatIndexBase(A_descr, CUSPARSE_INDEX_BASE_ZERO));
+    
+    ///////////////////             TEST
+    /* 
+    double *h_ADn = NULL, *d_ADn = NULL;
+    h_ADn = (double *)calloc(sizeof(double), A_nrows * A_ncols);
+    checkCudaErrors(cudaMalloc((void **)&d_ADn, sizeof(double) * A_nrows * A_ncols));
+
+    checkCudaErrors(cusparseDcsr2dense(node.cusparseHandle, A_nrows, A_ncols,
+                                       A_descr, // CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO
+                                       d_csrAVals, d_csrAOffs, d_csrAInds,
+                                       d_ADn, A_nrows));
+
+    checkCudaErrors(cudaMemcpy(h_ADn, d_ADn, sizeof(double) * A_nrows * A_ncols, cudaMemcpyDeviceToHost));
+    //for (i = 0; i < A_nrows; ++i)
+    //{
+    //    for (k = h_csrAOffs[i]; k < h_csrAOffs[i+1]; ++k)
+    //    {
+    //        h_ADn[i*A_nrows+h_csrAInds[k]] = h_csrAVals[k];
+    //    }
+    //}
+    utils_printDmat(A_nrows, A_ncols, A_nrows, h_ADn, false);
+
+    free(h_ADn);
+    checkCudaErrors(cudaFree(d_ADn));
+    */
+    ///////////////////             END TEST
+
+    free(h_csrAInds);
+    free(h_csrAOffs);
+    free(h_csrAVals);
+
+    checkCudaErrors(cudaMalloc((void **)&d_rhs, sizeof(double) * A_nrows));
+    checkCudaErrors(cudaMalloc((void **)&d_sol, sizeof(double) * A_nrows));
+
+    node.env->logger("Starting Merhrotra proceduce", "INFO", 17);
+    while ((iterations < node.env->MERHROTRA_MAX_ITER) && (mu > node.env->MERHROTRA_MU_TOL))
+    {
+        checkCudaErrors(cusolverSpDcsrlsvchol(node.cusolverSpHandle,
+                                              A_nrows, A_nnz, A_descr,
+                                              d_csrAVals, d_csrAOffs, d_csrAInds,
+                                              d_rhs,
+                                              node.env->MERHROTRA_CHOL_TOL, reorder,
+                                              d_sol, &singularity));
+
+        checkCudaErrors(cusolverSpDcsrlsvchol(node.cusolverSpHandle,
+                                              A_nrows, A_nnz, A_descr,
+                                              d_csrAVals, d_csrAOffs, d_csrAInds,
+                                              d_rhs,
+                                              node.env->MERHROTRA_CHOL_TOL, reorder,
+                                              d_sol, &singularity));
+
+        ++iterations;
+    }
 
     ///////////////////             RELEASE RESOURCES
+    checkCudaErrors(cusparseDestroyMatDescr(A_descr));
+
+    checkCudaErrors(cudaFree(d_csrAInds));
+    checkCudaErrors(cudaFree(d_csrAOffs));
+    checkCudaErrors(cudaFree(d_csrAVals));
+
+    checkCudaErrors(cudaFree(d_rhs));
+    checkCudaErrors(cudaFree(d_sol));
+
     checkCudaErrors(cusparseDestroySpMat(node.matTransDescr));
     node.matTransDescr = NULL;
 
-    checkCudaErrors(cudaFree(node.d_x));
-    checkCudaErrors(cudaFree(node.d_y));
-    checkCudaErrors(cudaFree(node.d_s));
+    // checkCudaErrors(cudaFree(node.d_csrMatTransInds));
+    // checkCudaErrors(cudaFree(node.d_csrMatTransOffs));
+    // checkCudaErrors(cudaFree(node.d_csrMatTransVals));
 
-    node.d_x = NULL;
-    node.d_x = NULL;
-    node.d_x = NULL;
+    // node.d_csrMatTransInds = NULL;
+    // node.d_csrMatTransOffs = NULL;
+    // node.d_csrMatTransVals = NULL;
 
-    checkCudaErrors(cudaFree(node.d_csrMatTransInds));
-    checkCudaErrors(cudaFree(node.d_csrMatTransOffs));
-    checkCudaErrors(cudaFree(node.d_csrMatTransVals));
-
-    node.d_csrMatTransInds = NULL;
-    node.d_csrMatTransOffs = NULL;
-    node.d_csrMatTransVals = NULL;
-
-    checkCudaErrors(cudaFree(d_buffer));
+    // checkCudaErrors(cudaFree(d_buffer));
 
     return CODE_SUCCESFULL;
 }
@@ -464,7 +622,7 @@ SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node)
     return CODE_SUCCESFULL;
 }
 
-SyphaStatus solver_sparse_merhrotra_init_3(SyphaNodeSparse &node)
+SyphaStatus solver_sparse_merhrotra_init_gsl(SyphaNodeSparse &node)
 {
     int i, j;
     int signum = 0;
@@ -587,9 +745,9 @@ SyphaStatus solver_sparse_merhrotra_init_3(SyphaNodeSparse &node)
     //printf("S:\n");
     //utils_printDvec(node.ncols, s->data, false);
 
-    checkCudaErrors(cudaMemcpy(node.d_x, x->data, sizeof(double) * node.ncols, cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMemcpy(node.d_y, y->data, sizeof(double) * node.nrows, cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMemcpy(node.d_s, s->data, sizeof(double) * node.ncols, cudaMemcpyHostToDevice));
+    memcpy(node.h_x, x->data, sizeof(double) * node.ncols);
+    memcpy(node.h_y, y->data, sizeof(double) * node.nrows);
+    memcpy(node.h_s, s->data, sizeof(double) * node.ncols);
 
     gsl_vector_free(x);
     gsl_vector_free(y);
