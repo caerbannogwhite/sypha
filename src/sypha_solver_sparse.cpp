@@ -466,159 +466,138 @@ SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node)
 
 SyphaStatus solver_sparse_merhrotra_init_3(SyphaNodeSparse &node)
 {
-    const int reorder = 0;
-    int singularity = 0;
-    int info = 0;
-    int i = 0;
-    int I_matBytes = node.nrows * node.nrows * sizeof(double);
-
-    double alpha = 1.0;
-    double beta = 0.0;
-
-    int *d_ipiv = NULL;
-    double *d_AAT = NULL;
-    double *d_matDn = NULL;
-    double *h_I = NULL;
-
-    void *d_buffer = NULL;
-    size_t currBufferSize = 0;
-    size_t bufferSize = 0;
+    int i, j;
+    int signum = 0;
+    double deltaX, deltaS, prod, sumX, sumS;
     char message[1024];
 
-    cusolverDnParams_t cusolverDnParams;
-    cusparseDnVecDescr_t vecX, vecY, vecS;
-    cusparseDnMatDescr_t AAT_descr, matDnDescr;
-    cusparseMatDescr_t matDescrGen;
+    gsl_vector *x = NULL;
+    gsl_vector *y = NULL;
+    gsl_vector *s = NULL;
+    gsl_matrix *inv = NULL;
+    gsl_matrix *mat = NULL;
+    gsl_matrix *tmp = NULL;
+    gsl_permutation *perm = NULL;
 
-    node.env->logger("Merhrotra starting point computation", "INFO", 13);
-    checkCudaErrors(cusolverDnCreateParams(&cusolverDnParams));
+    x = gsl_vector_alloc((size_t)node.ncols);
+    y = gsl_vector_alloc((size_t)node.nrows);
+    s = gsl_vector_alloc((size_t)node.ncols);
+    inv = gsl_matrix_calloc((size_t)node.nrows, (size_t)node.nrows);
+    mat = gsl_matrix_calloc((size_t)node.nrows, (size_t)node.ncols);
+    tmp = gsl_matrix_calloc((size_t)node.nrows, (size_t)node.ncols);
+    perm = gsl_permutation_alloc((size_t)node.nrows);
 
-    checkCudaErrors(cusparseCreateMatDescr(&matDescrGen));
-    checkCudaErrors(cusparseSetMatType(matDescrGen, CUSPARSE_MATRIX_TYPE_GENERAL));
-    checkCudaErrors(cusparseSetMatIndexBase(matDescrGen, CUSPARSE_INDEX_BASE_ZERO));
+    // csr to dense
+    for (i = 0; i < node.nrows; ++i)
+    {
+        for (j = node.h_csrMatOffs->data()[i]; j < node.h_csrMatOffs->data()[i + 1]; ++j)
+        {
+            mat->data[node.ncols * i + node.h_csrMatInds->data()[j]] = node.h_csrMatVals->data()[j];
+        }
+    }
+    //printf("MAT:\n");
+    //utils_printDmat(node.nrows, node.ncols, node.ncols, mat->data, false);
 
-    checkCudaErrors(cusparseCreateDnVec(&vecX, (int64_t)node.ncols,
-                                        node.d_x, CUDA_R_64F));
+    ///////////////////             MATRIX MULT
+    node.env->logger("solver_sparse_merhrotra_init - computing A * A'", "INFO", 20);
+    mat->size1 = node.nrows;
+    mat->size2 = node.ncols;
+    mat->tda = node.ncols;
+    tmp->size1 = node.nrows;
+    tmp->size2 = node.nrows;
+    tmp->tda = node.ncols;
+    gsl_blas_dgemm(CblasNoTrans, CblasTrans, 1.0, mat, mat, 0.0, tmp);
 
-    checkCudaErrors(cusparseCreateDnVec(&vecY, (int64_t)node.nrows,
-                                        node.d_y, CUDA_R_64F));
-
-    checkCudaErrors(cusparseCreateDnVec(&vecS, (int64_t)node.ncols,
-                                        node.d_s, CUDA_R_64F));
-
-    checkCudaErrors(cudaMalloc((void **)&d_AAT, sizeof(double) * node.nrows * node.nrows));
-    checkCudaErrors(cudaMalloc((void **)&d_matDn, sizeof(double) * node.nrows * node.ncols));
-
-    checkCudaErrors(cusparseCreateDnMat(&AAT_descr, (int64_t)node.nrows, (int64_t)node.nrows,
-                                        (int64_t)node.nrows, d_AAT, CUDA_R_64F,
-                                        CUSPARSE_ORDER_COL));
-
-    checkCudaErrors(cusparseCreateDnMat(&matDnDescr, (int64_t)node.nrows, (int64_t)node.ncols,
-                                        (int64_t)node.nrows, d_matDn, CUDA_R_64F,
-                                        CUSPARSE_ORDER_COL));
-
-    ///////////////////             STORE MATRIX IN DENSE FORMAT
-    node.env->logger("solver_sparse_merhrotra_init - storing matrix in dense format", "INFO", 20);
-    checkCudaErrors(cusparseDcsr2dense(node.cusparseHandle, node.nrows, node.ncols,
-                                       matDescrGen, // CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO
-                                       node.d_csrMatVals, node.d_csrMatOffs, node.d_csrMatInds,
-                                       d_matDn, node.nrows));
-
-    ///////////////////             COMPUTE AAT INVERSE MATRIX
-
-    // GEMM Computation: MATRIX * MATRIX'
-    node.env->logger("solver_sparse_merhrotra_init - computing mat * mat'", "INFO", 20);
-    checkCudaErrors(cusparseSpMM_bufferSize(node.cusparseHandle,
-                                            CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                            CUSPARSE_OPERATION_TRANSPOSE,
-                                            &alpha, node.matDescr, matDnDescr,
-                                            &beta, AAT_descr,
-                                            CUDA_R_64F,
-                                            CUSPARSE_CSRMM_ALG1,
-                                            &bufferSize));
-
-    // allocate memory for computation
-    currBufferSize = bufferSize > I_matBytes ? bufferSize : I_matBytes;
-    checkCudaErrors(cudaMalloc((void **)&d_buffer, currBufferSize));
-
-    checkCudaErrors(cusparseSpMM(node.cusparseHandle,
-                                 CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                 CUSPARSE_OPERATION_TRANSPOSE,
-                                 &alpha, node.matDescr, matDnDescr,
-                                 &beta, AAT_descr,
-                                 CUDA_R_64F,
-                                 CUSPARSE_CSRMM_ALG1,
-                                 d_buffer));
+    //printf("AAT:\n");
+    //utils_printDmat(node.nrows, node.nrows, node.ncols, tmp->data, false);
 
     ///////////////////             MATRIX INVERSION
-
-    node.env->logger("solver_sparse_merhrotra_init - computing matrix inversion", "INFO", 20);
+    node.env->logger("solver_sparse_merhrotra_init - computing inv(AAT)", "INFO", 20);
     
-    int signum;
-    gsl_permutation *p = gsl_permutation_alloc((size_t) node.nrows);
-    gsl_matrix *lu = gsl_matrix_alloc((size_t) node.nrows, (size_t) node.nrows);
-    gsl_matrix *inv = gsl_matrix_alloc((size_t)node.nrows, (size_t)node.nrows);
-    
-    checkCudaErrors(cudaMemcpy(lu->data, d_AAT, sizeof(double) * node.nrows * node.nrows, cudaMemcpyDeviceToHost));
-
-    //utils_printDmat(node.nrows, node.nrows, node.nrows, lu->data, false);
-
-    gsl_linalg_LU_decomp(lu, p, &signum);
-    gsl_linalg_LU_invert(lu, p, inv);
+    inv->size1 = node.nrows;
+    inv->size2 = node.nrows;
+    inv->tda = node.nrows;
+    gsl_linalg_LU_decomp(tmp, perm, &signum);
+    gsl_linalg_LU_invert(tmp, perm, inv);
 
     //printf("INV:\n");
     //utils_printDmat(node.nrows, node.nrows, node.nrows, inv->data, false);
 
-    gsl_permutation_free(p);
-    gsl_matrix_free(lu);
-    gsl_matrix_free(inv);
+    ///////////////////             COMPUTE x = mat' * AAT_inv * rhs
+    node.env->logger("solver_sparse_merhrotra_init - computing x <-- A' * inv(AAT) * rhs", "INFO", 20);
 
+    tmp->size1 = node.ncols;
+    tmp->size2 = node.nrows;
+    tmp->tda = node.nrows;
+    gsl_blas_dgemm(CblasTrans, CblasNoTrans, 1.0, mat, inv, 0.0, tmp);
+
+    // put RHS in Y
+    memcpy(y->data, node.h_RhsDns, sizeof(double) * node.nrows);
+    gsl_blas_dgemv(CblasNoTrans, 1.0, tmp, y, 0.0, x);
+
+    //printf("TMP:\n");
+    //utils_printDmat(node.ncols, node.nrows, node.nrows, tmp->data, false);
+
+    ///////////////////             COMPUTE y = AAT_inv * mat * obj
+    node.env->logger("solver_sparse_merhrotra_init - computing y <-- inv(AAT) * A * obj", "INFO", 20);
+
+    tmp->size1 = node.nrows;
+    tmp->size2 = node.ncols;
+    tmp->tda = node.ncols;
+    
+    // put OBJ in S
+    memcpy(s->data, node.h_ObjDns, sizeof(double) * node.ncols);
+    
+    gsl_blas_dgemm(CblasNoTrans, CblasNoTrans, 1.0, inv, mat, 0.0, tmp);
+    gsl_blas_dgemv(CblasNoTrans, 1.0, tmp, s, 0.0, y);
+
+    //printf("TMP:\n");
+    //utils_printDmat(node.ncols, node.nrows, node.nrows, tmp->data, false);
 
     ///////////////////             COMPUTE s = - mat' * y + obj
-    node.env->logger("solver_sparse_merhrotra_init - computing s = - mat' * y + obj", "INFO", 20);
-    alpha = -1.0;
-    beta = 1.0;
+    node.env->logger("solver_sparse_merhrotra_init - computing s <-- obj - A' * y", "INFO", 20);
+    gsl_blas_dgemv(CblasTrans, -1.0, mat, y, 1.0, s);
 
-    // copy obj on s
-    checkCudaErrors(cudaMemcpyAsync(node.d_s, node.d_ObjDns, sizeof(double) * node.ncols,
-                                    cudaMemcpyDeviceToDevice, node.cudaStream));
+    deltaX = gsl_max(-1.5 * gsl_vector_min(x), 0.0);
+    deltaS = gsl_max(-1.5 * gsl_vector_min(s), 0.0);
 
-    checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle,
-                                            CUSPARSE_OPERATION_TRANSPOSE,
-                                            &alpha, node.matDescr, vecY,
-                                            &beta, vecS,
-                                            CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
-                                            &bufferSize));
+    gsl_vector_add_constant(x, deltaX);
+    gsl_vector_add_constant(s, deltaS);
 
-    if (bufferSize > currBufferSize)
+    gsl_blas_ddot(x, s, &prod);
+    prod *= 0.5;
+
+    sumX = 0.0;
+    sumS = 0.0;
+    for (j = 0; j < node.ncols; ++j)
     {
-        currBufferSize = bufferSize;
-        checkCudaErrors(cudaMalloc((void **)&d_buffer, currBufferSize));
+        sumX += x->data[j];
+        sumS += s->data[j];
     }
-    checkCudaErrors(cudaDeviceSynchronize());
+    deltaX = prod / sumS;
+    deltaS = prod / sumX;
 
-    checkCudaErrors(cusparseSpMV(node.cusparseHandle,
-                                 CUSPARSE_OPERATION_TRANSPOSE,
-                                 &alpha, node.matDescr, vecY,
-                                 &beta, vecS,
-                                 CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
-                                 d_buffer));
+    gsl_vector_add_constant(x, deltaX);
+    gsl_vector_add_constant(s, deltaS);
 
-    ///////////////////             FREE RESOURCES
-    checkCudaErrors(cusolverDnDestroyParams(cusolverDnParams));
+    //printf("X:\n");
+    //utils_printDvec(node.ncols, x->data, false);
+    //printf("Y:\n");
+    //utils_printDvec(node.nrows, y->data, false);
+    //printf("S:\n");
+    //utils_printDvec(node.ncols, s->data, false);
 
-    checkCudaErrors(cusparseDestroyMatDescr(matDescrGen));
-    checkCudaErrors(cusparseDestroyDnMat(AAT_descr));
+    checkCudaErrors(cudaMemcpy(node.d_x, x->data, sizeof(double) * node.ncols, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(node.d_y, y->data, sizeof(double) * node.nrows, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(node.d_s, s->data, sizeof(double) * node.ncols, cudaMemcpyHostToDevice));
 
-    checkCudaErrors(cusparseDestroyDnVec(vecX));
-    checkCudaErrors(cusparseDestroyDnVec(vecY));
-    checkCudaErrors(cusparseDestroyDnVec(vecS));
-
-    checkCudaErrors(cudaFree(d_ipiv));
-    checkCudaErrors(cudaFree(d_buffer));
-
-    checkCudaErrors(cudaFree(d_AAT));
-    checkCudaErrors(cudaFree(d_matDn));
+    gsl_vector_free(x);
+    gsl_vector_free(y);
+    gsl_vector_free(s);
+    gsl_matrix_free(inv);
+    gsl_matrix_free(mat);
+    gsl_matrix_free(tmp);
+    gsl_permutation_free(perm);
 
     return CODE_SUCCESFULL;
 }

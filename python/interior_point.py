@@ -40,7 +40,7 @@ def initial_point_computation_dense(mat: numpy.array,
     x = mat.T.dot(AAT_inv).dot(rhs)
     y = AAT_inv.dot(mat).dot(obj)
     s = obj - mat.T.dot(y)
-    
+
     delta_x = max(-1.5 * numpy.min(x), 0.0)
     delta_s = max(-1.5 * numpy.min(s), 0.0)
 
@@ -48,10 +48,10 @@ def initial_point_computation_dense(mat: numpy.array,
     s_hat = s + delta_s
 
     p = x_hat.dot(s_hat)
-
+    
     delta_x_hat = 0.5 * p / numpy.sum(s_hat)
     delta_s_hat = 0.5 * p / numpy.sum(x_hat)
-
+    
     return x_hat + delta_x_hat, y, s_hat + delta_s_hat
 
 

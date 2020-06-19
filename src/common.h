@@ -33,5 +33,7 @@ enum ModelInputType
 
 int utils_printDmat(int m, int n, int l, double *mat, bool device);
 int utils_printImat(int m, int n, int l, int *mat, bool device);
+int utils_printDvec(int n, double *vec, bool device);
+int utils_printIvec(int n, int *vec, bool device);
 
 #endif // COMMON_H
