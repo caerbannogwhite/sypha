@@ -49,6 +49,8 @@ SyphaNodeSparse::SyphaNodeSparse(SyphaEnvironment &env)
     rhsDescr = NULL;
 
     cudaStream = NULL;
+    
+    cublasHandle = NULL;
     cusparseHandle = NULL;
     cusolverDnHandle = NULL;
     cusolverSpHandle = NULL;
@@ -89,9 +91,11 @@ SyphaNodeSparse::~SyphaNodeSparse()
     if (this->objDescr) checkCudaErrors(cusparseDestroyDnVec(this->objDescr));
     if (this->rhsDescr) checkCudaErrors(cusparseDestroyDnVec(this->rhsDescr));
 
+    if (this->cublasHandle) checkCudaErrors(cublasDestroy(this->cublasHandle));
     if (this->cusparseHandle) checkCudaErrors(cusparseDestroy(this->cusparseHandle));
     if (this->cusolverDnHandle) checkCudaErrors(cusolverDnDestroy(this->cusolverDnHandle));
     if (this->cusolverSpHandle) checkCudaErrors(cusolverSpDestroy(this->cusolverSpHandle));
+
     if (this->cudaStream) checkCudaErrors(cudaStreamDestroy(this->cudaStream));
 }
 
@@ -207,14 +211,16 @@ SyphaStatus SyphaNodeSparse::setUpCuda()
     // initialize a cuda stream for this node
     checkCudaErrors(cudaStreamCreate(&this->cudaStream));
 
+    checkCudaErrors(cublasCreate(&this->cublasHandle));
+    checkCudaErrors(cusparseCreate(&this->cusparseHandle));
     checkCudaErrors(cusolverDnCreate(&this->cusolverDnHandle));
     checkCudaErrors(cusolverSpCreate(&this->cusolverSpHandle));
-    checkCudaErrors(cusparseCreate(&this->cusparseHandle));
 
     // bind stream to cusparse and cusolver
+    checkCudaErrors(cublasSetStream(this->cublasHandle, this->cudaStream));
+    checkCudaErrors(cusparseSetStream(this->cusparseHandle, this->cudaStream));
     checkCudaErrors(cusolverDnSetStream(this->cusolverDnHandle, this->cudaStream));
     checkCudaErrors(cusolverSpSetStream(this->cusolverSpHandle, this->cudaStream));
-    checkCudaErrors(cusparseSetStream(this->cusparseHandle, this->cudaStream));
 
     return CODE_SUCCESFULL;
 }

@@ -8,8 +8,9 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
 
     int i = 0, j = 0, k = 0, iterations = 0;
     size_t bufferSize = 0;
+    double alpha, beta;
     double mu = 0.0;
-    void *d_buffer = NULL;
+    char *d_buffer = NULL;
     char message[1024];
 
     cusparseMatDescr_t A_descr;
@@ -193,8 +194,72 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     free(h_csrAOffs);
     free(h_csrAVals);
 
+    ///////////////////             INITIALISE RHS
+    node.env->logger("Initialise right-hand-side", "INFO", 17);
     checkCudaErrors(cudaMalloc((void **)&d_rhs, sizeof(double) * A_nrows));
     checkCudaErrors(cudaMalloc((void **)&d_sol, sizeof(double) * A_nrows));
+
+    // put x, y, s on device sol as [x, y, s]
+    double *d_x = d_sol;
+    double *d_y = &d_sol[node.ncols];
+    double *d_s = &d_sol[node.ncols + node.nrows];
+
+    checkCudaErrors(cudaMemcpy(d_x, node.h_x, sizeof(double) * node.ncols, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_y, node.h_y, sizeof(double) * node.nrows, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_s, node.h_s, sizeof(double) * node.ncols, cudaMemcpyHostToDevice));
+
+    // put OBJ and S on device rhs
+    double *d_resC = d_rhs;
+    double *d_resB = &d_rhs[node.ncols];
+    double *d_resXS = &d_rhs[node.ncols + node.nrows];
+
+    checkCudaErrors(cudaMemcpy(d_resC, node.d_ObjDns, sizeof(double) * node.ncols, cudaMemcpyDeviceToDevice));
+    checkCudaErrors(cudaMemcpy(d_resB, node.d_RhsDns, sizeof(double) * node.nrows, cudaMemcpyDeviceToDevice));
+
+    // Residuals
+    // resB, resC equation 14.7, page 395(414)Numerical Optimization
+    // resC = mat' * y - (obj - s)
+    // resB = mat  * x - rhs
+
+    cusparseDnVecDescr_t vecX, vecY, vecResC, vecResB;
+
+    checkCudaErrors(cusparseCreateDnVec(&vecX, (int64_t)node.ncols, d_x, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&vecY, (int64_t)node.nrows, d_y, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&vecResC, (int64_t)node.ncols, d_resC, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&vecResB, (int64_t)node.nrows, d_resB, CUDA_R_64F));
+
+    alpha = -1.0;
+    checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
+                                &alpha, d_s, 1, d_resC, 1));
+
+    alpha = 1.0;
+    beta = -1.0;
+    checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle, CUSPARSE_OPERATION_TRANSPOSE,
+                                            &alpha, node.matDescr, vecY,
+                                            &beta, vecResC, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                                            &bufferSize));
+
+    checkCudaErrors(cudaMalloc((void **)&d_buffer, bufferSize));
+
+    checkCudaErrors(cusparseSpMV(node.cusparseHandle, CUSPARSE_OPERATION_TRANSPOSE,
+                                 &alpha, node.matDescr, vecY,
+                                 &beta, vecResC, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                                 d_buffer));
+
+    alpha = 1.0;
+    beta = -1.0;
+    checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                            &alpha, node.matDescr, vecX,
+                                            &beta, vecResB, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                                            &bufferSize));
+
+    checkCudaErrors(cudaMalloc((void **)&d_buffer, bufferSize));
+
+    checkCudaErrors(cusparseSpMV(node.cusparseHandle,
+                                 CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                 &alpha, node.matDescr, vecX,
+                                 &beta, vecResB, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                                 (size_t *)d_buffer));
 
     node.env->logger("Starting Merhrotra proceduce", "INFO", 17);
     while ((iterations < node.env->MERHROTRA_MAX_ITER) && (mu > node.env->MERHROTRA_MU_TOL))
@@ -226,6 +291,11 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     checkCudaErrors(cudaFree(d_rhs));
     checkCudaErrors(cudaFree(d_sol));
 
+    checkCudaErrors(cusparseDestroyDnVec(vecX));
+    checkCudaErrors(cusparseDestroyDnVec(vecY));
+    checkCudaErrors(cusparseDestroyDnVec(vecResC));
+    checkCudaErrors(cusparseDestroyDnVec(vecResB));
+
     checkCudaErrors(cusparseDestroySpMat(node.matTransDescr));
     node.matTransDescr = NULL;
 
@@ -237,7 +307,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     // node.d_csrMatTransOffs = NULL;
     // node.d_csrMatTransVals = NULL;
 
-    // checkCudaErrors(cudaFree(d_buffer));
+    if (d_buffer) checkCudaErrors(cudaFree(d_buffer));
 
     return CODE_SUCCESFULL;
 }

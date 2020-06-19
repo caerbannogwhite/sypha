@@ -61,6 +61,7 @@ private:
     SyphaEnvironment *env;
 
     cudaStream_t cudaStream;
+    cublasHandle_t cublasHandle;
     cusparseHandle_t cusparseHandle;
     cusolverDnHandle_t cusolverDnHandle;
     cusolverSpHandle_t cusolverSpHandle;
