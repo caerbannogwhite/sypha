@@ -51,7 +51,9 @@ public:
     friend SyphaStatus solver_dense_merhrotra(SyphaNodeDense &node);
     friend SyphaStatus solver_dense_merhrotra_init(SyphaNodeDense &node);
     friend SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_merhrotra_init(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_merhrotra_init_1(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_merhrotra_init_3(SyphaNodeSparse &node);
 };
 
 #endif // SYPHA_ENVIRONMENT_H

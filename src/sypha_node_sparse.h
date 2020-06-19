@@ -62,6 +62,7 @@ private:
 
     cudaStream_t cudaStream;
     cusparseHandle_t cusparseHandle;
+    cusolverDnHandle_t cusolverDnHandle;
     cusolverSpHandle_t cusolverSpHandle;
 
 public:
@@ -81,7 +82,9 @@ public:
     friend SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string inputFilePath);
     friend SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string inputFilePath);
     friend SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_merhrotra_init(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_merhrotra_init_1(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_merhrotra_init_3(SyphaNodeSparse &node);
 };
 
 #endif // SYPHA_NODE_SPARSE_H

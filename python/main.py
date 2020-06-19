@@ -43,7 +43,7 @@ def launch(path, instance, sparse=False):
 
 #path = Path("C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\ex_balas1.txt")
 path = Path(f"/home/macs/coding/optimization/sypha/data/ex_balas1.txt")
-launch(path, "ex_balas1", sparse=True)
+launch(path, "ex_balas1")
 
 counter = 0
 counter_ok = 0
