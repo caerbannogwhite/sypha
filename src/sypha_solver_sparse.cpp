@@ -180,29 +180,23 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     checkCudaErrors(cusparseSetMatIndexBase(A_descr, CUSPARSE_INDEX_BASE_ZERO));
     
     ///////////////////             TEST
-    /* 
-    double *h_ADn = NULL, *d_ADn = NULL;
-    h_ADn = (double *)calloc(sizeof(double), A_nrows * A_ncols);
-    checkCudaErrors(cudaMalloc((void **)&d_ADn, sizeof(double) * A_nrows * A_ncols));
+    // double *d_ADn = NULL;
+    // checkCudaErrors(cudaMalloc((void **)&d_ADn, sizeof(double) * A_nrows * A_ncols));
 
-    checkCudaErrors(cusparseDcsr2dense(node.cusparseHandle, A_nrows, A_ncols,
-                                       A_descr, // CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO
-                                       d_csrAVals, d_csrAOffs, d_csrAInds,
-                                       d_ADn, A_nrows));
+    // checkCudaErrors(cusparseDcsr2dense(node.cusparseHandle, A_nrows, A_ncols,
+    //                                    A_descr, // CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO
+    //                                    d_csrAVals, d_csrAOffs, d_csrAInds,
+    //                                    d_ADn, A_nrows));
 
-    checkCudaErrors(cudaMemcpy(h_ADn, d_ADn, sizeof(double) * A_nrows * A_ncols, cudaMemcpyDeviceToHost));
-    //for (i = 0; i < A_nrows; ++i)
-    //{
-    //    for (k = h_csrAOffs[i]; k < h_csrAOffs[i+1]; ++k)
-    //    {
-    //        h_ADn[i*A_nrows+h_csrAInds[k]] = h_csrAVals[k];
-    //    }
-    //}
-    utils_printDmat(A_nrows, A_ncols, A_nrows, h_ADn, false);
+    // utils_printDmat(A_nrows, A_ncols, A_nrows, d_ADn, true);
+    // checkCudaErrors(cudaFree(d_ADn));
 
-    free(h_ADn);
-    checkCudaErrors(cudaFree(d_ADn));
-    */
+    printf("OFFS:\n");
+    utils_printIvec(A_nrows+1, d_csrAOffs, true);
+    printf("INDS:\n");
+    utils_printIvec(A_nnz, d_csrAInds, true);
+    printf("VALS:\n");
+    utils_printDvec(A_nnz, d_csrAVals, true);
     ///////////////////             END TEST
 
     free(h_csrAInds);
@@ -300,6 +294,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     while ((iterations < node.env->MERHROTRA_MAX_ITER) && (mu > node.env->MERHROTRA_MU_TOL))
     {
 
+
         // x, s multiplication and res XS update: to improve
         for (j = 0; j < node.ncols; ++j)
         {
@@ -309,6 +304,21 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
             checkCudaErrors(cudaMemcpy(&d_resXS[j], &alpha, sizeof(double), cudaMemcpyHostToDevice));
         }
 
+        ///////////////             TEST
+        printf("\n\nLOOP START\nmu: %lf\n", mu);
+        printf("X:\n");
+        utils_printDvec(node.ncols, d_x, true);
+        printf("Y:\n");
+        utils_printDvec(node.nrows, d_y, true);
+        printf("S:\n");
+        utils_printDvec(node.ncols, d_s, true);
+        printf("delta X:\n");
+        utils_printDvec(node.ncols, d_deltaX, true);
+        printf("delta S:\n");
+        utils_printDvec(node.ncols, d_deltaS, true);
+        printf("rhs :\n");
+        utils_printDvec(node.ncols*2+node.nrows, d_rhs, true);
+        ///////////////             END TEST
 
         checkCudaErrors(cusolverSpDcsrlsvchol(node.cusolverSpHandle,
                                               A_nrows, A_nnz, A_descr,
@@ -316,6 +326,22 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
                                               d_rhs,
                                               node.env->MERHROTRA_CHOL_TOL, reorder,
                                               d_sol, &singularity));
+
+        ///////////////             TEST
+        printf("\n\nAFTER AFFINE SYSTEM\nmu: %lf, sing: %d\n", mu, singularity);
+        printf("X:\n");
+        utils_printDvec(node.ncols, d_x, true);
+        printf("Y:\n");
+        utils_printDvec(node.nrows, d_y, true);
+        printf("S:\n");
+        utils_printDvec(node.ncols, d_s, true);
+        printf("delta X:\n");
+        utils_printDvec(node.ncols, d_deltaX, true);
+        printf("delta S:\n");
+        utils_printDvec(node.ncols, d_deltaS, true);
+        printf("rhs :\n");
+        utils_printDvec(node.ncols*2+node.nrows, d_rhs, true);
+        ///////////////             END TEST
 
         // affine step length, definition 14.32 at page 408(427)
         // alpha_max_p = min([-xi / delta_xi for xi, delta_xi in zip(x, delta_x_aff) if delta_xi < 0.0])
@@ -424,6 +450,20 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
         }
 
         ++iterations;
+
+        ///////////////             TEST
+        printf("\n\nLOOP END\nmu: %lf, sing: %d\n", mu, singularity);
+        printf("X:\n");
+        utils_printDvec(node.ncols, d_x, true);
+        printf("Y:\n");
+        utils_printDvec(node.nrows, d_y, true);
+        printf("S:\n");
+        utils_printDvec(node.ncols, d_s, true);
+        printf("delta X:\n");
+        utils_printDvec(node.ncols, d_deltaX, true);
+        printf("delta S:\n");
+        utils_printDvec(node.ncols, d_deltaS, true);
+        ///////////////             END TEST
     }
 
     checkCudaErrors(cublasDdot(node.cublasHandle, node.ncols,
