@@ -8,14 +8,28 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
 
     int i = 0, j = 0, k = 0, iterations = 0;
     size_t bufferSize = 0;
-    double alpha, beta;
-    double mu = 0.0;
-    char *d_buffer = NULL;
+    size_t currBufferSize = 0;
+    double alpha, beta, alphaPrim, alphaDual, sigma, mu, muAff;
+    double alphaMaxPrim, alphaMaxDual, objValPrim, objValDual;
+    double *d_bufferX = NULL;
+    double *d_bufferS = NULL;
+    double *d_ones = NULL;
+    double *d_buffer = NULL;
     char message[1024];
 
     cusparseMatDescr_t A_descr;
 
+    ///////////////////             SET UP ONES
+
+    checkCudaErrors(cudaMalloc((void **)&d_ones, sizeof(double) * node.ncols));
+    alpha = 1.0;
+    for (i = 0; i < node.ncols; ++i)
+    {
+        checkCudaErrors(cudaMemcpy(&d_ones[i], &alpha, sizeof(double), cudaMemcpyHostToDevice));
+    }
+
     ///////////////////             GET TRANSPOSED MATRIX
+    
     // checkCudaErrors(cudaMalloc((void **)&node.d_csrMatTransOffs, sizeof(int) * (node.ncols + 1)));
     // checkCudaErrors(cudaMalloc((void **)&node.d_csrMatTransInds, sizeof(int) * node.nnz));
     // checkCudaErrors(cudaMalloc((void **)&node.d_csrMatTransVals, sizeof(double) * node.nnz));
@@ -81,6 +95,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
 
     double *d_rhs = NULL;
     double *d_sol = NULL;
+    double *d_prevSol = NULL;
 
     h_csrAInds = (int *)calloc(sizeof(int), A_nnz);
     h_csrAOffs = (int *)calloc(sizeof(int), (A_nrows + 1));
@@ -195,14 +210,20 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     free(h_csrAVals);
 
     ///////////////////             INITIALISE RHS
+    
     node.env->logger("Initialise right-hand-side", "INFO", 17);
     checkCudaErrors(cudaMalloc((void **)&d_rhs, sizeof(double) * A_nrows));
     checkCudaErrors(cudaMalloc((void **)&d_sol, sizeof(double) * A_nrows));
+    checkCudaErrors(cudaMalloc((void **)&d_prevSol, sizeof(double) * A_nrows));
 
     // put x, y, s on device sol as [x, y, s]
-    double *d_x = d_sol;
-    double *d_y = &d_sol[node.ncols];
-    double *d_s = &d_sol[node.ncols + node.nrows];
+    double *d_x = d_prevSol;
+    double *d_y = &d_prevSol[node.ncols];
+    double *d_s = &d_prevSol[node.ncols + node.nrows];
+
+    double *d_deltaX = d_sol;
+    double *d_deltaY = &d_sol[node.ncols];
+    double *d_deltaS = &d_sol[node.ncols + node.nrows];
 
     checkCudaErrors(cudaMemcpy(d_x, node.h_x, sizeof(double) * node.ncols, cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemcpy(d_y, node.h_y, sizeof(double) * node.nrows, cudaMemcpyHostToDevice));
@@ -218,8 +239,8 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
 
     // Residuals
     // resB, resC equation 14.7, page 395(414)Numerical Optimization
-    // resC = mat' * y - (obj - s)
-    // resB = mat  * x - rhs
+    // resC = -mat' * y + (obj - s)
+    // resB = -mat  * x + rhs
 
     cusparseDnVecDescr_t vecX, vecY, vecResC, vecResB;
 
@@ -232,28 +253,35 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
                                 &alpha, d_s, 1, d_resC, 1));
 
-    alpha = 1.0;
-    beta = -1.0;
+    alpha = -1.0;
+    beta = 1.0;
     checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle, CUSPARSE_OPERATION_TRANSPOSE,
                                             &alpha, node.matDescr, vecY,
                                             &beta, vecResC, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
                                             &bufferSize));
 
-    checkCudaErrors(cudaMalloc((void **)&d_buffer, bufferSize));
+    // buffer size for other needs
+    currBufferSize = (size_t)(sizeof(double) * node.ncols * 2);
+    currBufferSize = currBufferSize > bufferSize ? currBufferSize : bufferSize;
+    checkCudaErrors(cudaMalloc((void **)&d_buffer, currBufferSize));
 
     checkCudaErrors(cusparseSpMV(node.cusparseHandle, CUSPARSE_OPERATION_TRANSPOSE,
                                  &alpha, node.matDescr, vecY,
                                  &beta, vecResC, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
                                  d_buffer));
 
-    alpha = 1.0;
-    beta = -1.0;
+    alpha = -1.0;
+    beta = 1.0;
     checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                                             &alpha, node.matDescr, vecX,
                                             &beta, vecResB, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
                                             &bufferSize));
 
-    checkCudaErrors(cudaMalloc((void **)&d_buffer, bufferSize));
+    if (bufferSize > currBufferSize)
+    {
+        currBufferSize = bufferSize;
+        checkCudaErrors(cudaMalloc((void **)&d_buffer, currBufferSize));
+    }
 
     checkCudaErrors(cusparseSpMV(node.cusparseHandle,
                                  CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -261,15 +289,26 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
                                  &beta, vecResB, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
                                  (size_t *)d_buffer));
 
+    ///////////////////             CALCULATE MU
+    // duality measure, defined at page 395(414) Numerical Optimization
+    checkCudaErrors(cublasDdot(node.cublasHandle, node.ncols, d_x, 1, d_s, 1, &mu));
+    mu /= node.ncols;
+
+    ///////////////////             MAIN LOOP
+
     node.env->logger("Starting Merhrotra proceduce", "INFO", 17);
     while ((iterations < node.env->MERHROTRA_MAX_ITER) && (mu > node.env->MERHROTRA_MU_TOL))
     {
-        checkCudaErrors(cusolverSpDcsrlsvchol(node.cusolverSpHandle,
-                                              A_nrows, A_nnz, A_descr,
-                                              d_csrAVals, d_csrAOffs, d_csrAInds,
-                                              d_rhs,
-                                              node.env->MERHROTRA_CHOL_TOL, reorder,
-                                              d_sol, &singularity));
+
+        // x, s multiplication and res XS update: to improve
+        for (j = 0; j < node.ncols; ++j)
+        {
+            checkCudaErrors(cudaMemcpy(&alpha, &d_x[j], sizeof(double), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpy(&beta, &d_s[j], sizeof(double), cudaMemcpyDeviceToHost));
+            alpha = - (alpha * beta);
+            checkCudaErrors(cudaMemcpy(&d_resXS[j], &alpha, sizeof(double), cudaMemcpyHostToDevice));
+        }
+
 
         checkCudaErrors(cusolverSpDcsrlsvchol(node.cusolverSpHandle,
                                               A_nrows, A_nnz, A_descr,
@@ -277,12 +316,132 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
                                               d_rhs,
                                               node.env->MERHROTRA_CHOL_TOL, reorder,
                                               d_sol, &singularity));
+
+        // affine step length, definition 14.32 at page 408(427)
+        // alpha_max_p = min([-xi / delta_xi for xi, delta_xi in zip(x, delta_x_aff) if delta_xi < 0.0])
+        // alpha_max_d = min([-si / delta_si for si, delta_si in zip(s, delta_s_aff) if delta_si < 0.0])
+
+        // finding alphaMaxPrim and alphaMaxDual: to improve
+        alphaMaxPrim = DBL_MAX;
+        alphaMaxDual = DBL_MAX;
+        for (j = 0; j < node.ncols; ++j)
+        {
+            checkCudaErrors(cudaMemcpy(&alpha, &d_x[j], sizeof(double), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpy(&beta, &d_deltaX[j], sizeof(double), cudaMemcpyDeviceToHost));
+            if (beta < 0.0)
+            {
+                alpha = -(alpha / beta);
+                alphaMaxPrim = alphaMaxPrim < alpha ? alphaMaxPrim : alpha;
+            }
+
+            checkCudaErrors(cudaMemcpy(&alpha, &d_s[j], sizeof(double), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpy(&beta, &d_deltaS[j], sizeof(double), cudaMemcpyDeviceToHost));
+            if (beta < 0.0)
+            {
+                alpha = -(alpha / beta);
+                alphaMaxPrim = alphaMaxPrim < alpha ? alphaMaxPrim : alpha;
+            }
+        }
+
+        alphaPrim = gsl_min(1.0, alphaMaxPrim);
+        alphaDual = gsl_min(1.0, alphaMaxDual);
+
+        // mu_aff = (x + alpha_aff_p * delta_x_aff).dot(s + alpha_aff_d * delta_s_aff) / float(n)
+        // d_deltaX, d_deltaY, d_deltaS are pointees to d_sol
+        // the solution of the previous system
+        // the dimension of the buffer is guaranteed to be >= 2 * ncols
+        d_bufferX = d_buffer;
+        d_bufferS = &d_buffer[node.ncols];
+        checkCudaErrors(cudaMemcpy(d_bufferX, d_x, sizeof(double) * node.ncols, cudaMemcpyDeviceToDevice));
+        checkCudaErrors(cudaMemcpy(d_bufferS, d_s, sizeof(double) * node.ncols, cudaMemcpyDeviceToDevice));
+
+        checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
+                                    &alphaPrim, d_deltaX, 1, d_bufferX, 1));
+
+        checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
+                                    &alphaDual, d_deltaS, 1, d_bufferS, 1));
+
+        checkCudaErrors(cublasDdot(node.cublasHandle, node.ncols, d_bufferX, 1, d_bufferS, 1, &muAff));
+        muAff /= node.ncols;
+
+        // corrector step or centering parameter
+        sigma = gsl_pow_3(muAff / mu);
+
+        // x, s multiplication and res XS update: to improve
+        for (j = 0; j < node.ncols; ++j)
+        {
+            checkCudaErrors(cudaMemcpy(&alpha, &d_deltaX[j], sizeof(double), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpy(&beta, &d_deltaS[j], sizeof(double), cudaMemcpyDeviceToHost));
+            alpha = -(alpha * beta) + sigma * mu;
+            checkCudaErrors(cudaMemcpy(&d_bufferX[j], &alpha, sizeof(double), cudaMemcpyHostToDevice));
+        }
+
+        alpha = 1.0;
+        checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
+                                    &alpha, d_bufferX, 1, d_resXS, 1));
+
+        checkCudaErrors(cusolverSpDcsrlsvchol(node.cusolverSpHandle,
+                                              A_nrows, A_nnz, A_descr,
+                                              d_csrAVals, d_csrAOffs, d_csrAInds,
+                                              d_rhs,
+                                              node.env->MERHROTRA_CHOL_TOL, reorder,
+                                              d_sol, &singularity));
+
+        alphaPrim = gsl_min(1.0, node.env->MERHROTRA_ETA * alphaMaxPrim);
+        alphaDual = gsl_min(1.0, node.env->MERHROTRA_ETA * alphaMaxDual);
+
+        // d_deltaX, d_deltaY, d_deltaS are pointees to d_sol
+        // the solution of the previous system 
+
+        checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
+                                    &alphaPrim, d_deltaX, 1, d_x, 1));
+
+        checkCudaErrors(cublasDaxpy(node.cublasHandle, node.nrows,
+                                    &alphaDual, d_deltaY, 1, d_y, 1));
+        
+        checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
+                                    &alphaDual, d_deltaS, 1, d_s, 1));
+
+        ///////////////             UPDATE
+
+        alpha = (alphaDual - 1.0);
+        checkCudaErrors(cublasDscal(node.cublasHandle, node.ncols,
+                                    &alpha, d_resC, 1));
+
+        alpha = (alphaPrim - 1.0);
+        checkCudaErrors(cublasDscal(node.cublasHandle, node.nrows,
+                                    &alpha, d_resB, 1));
+
+        checkCudaErrors(cublasDdot(node.cublasHandle, node.ncols, d_x, 1, d_s, 1, &mu));
+        mu /= node.ncols;
+
+        // update x and s on matrix
+        off = node.nnz * 2 + node.ncols;
+        for (j = 0; j < node.ncols; ++j)
+        {
+            checkCudaErrors(cudaMemcpy(&d_csrAVals[off++], &d_s[j], sizeof(double), cudaMemcpyDeviceToDevice));
+            checkCudaErrors(cudaMemcpy(&d_csrAVals[off++], &d_x[j], sizeof(double), cudaMemcpyDeviceToDevice));
+        }
 
         ++iterations;
     }
 
+    checkCudaErrors(cublasDdot(node.cublasHandle, node.ncols,
+                               d_x, 1, node.d_ObjDns, 1, &objValPrim));
+
+    checkCudaErrors(cublasDdot(node.cublasHandle, node.nrows,
+                               d_y, 1, node.d_RhsDns, 1, &objValDual));
+
+    node.env->logger("Merhrotra procedure complete", "INFO", 10);
+
+    sprintf(message, "Primal: %10.4lf, Dual: %10.4lf, iterations: %d", objValPrim, objValDual, iterations);
+    node.env->logger(message, "INFO", 5);
+
     ///////////////////             RELEASE RESOURCES
+
     checkCudaErrors(cusparseDestroyMatDescr(A_descr));
+
+    checkCudaErrors(cudaFree(d_ones));
 
     checkCudaErrors(cudaFree(d_csrAInds));
     checkCudaErrors(cudaFree(d_csrAOffs));
@@ -290,6 +449,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
 
     checkCudaErrors(cudaFree(d_rhs));
     checkCudaErrors(cudaFree(d_sol));
+    checkCudaErrors(cudaFree(d_prevSol));
 
     checkCudaErrors(cusparseDestroyDnVec(vecX));
     checkCudaErrors(cusparseDestroyDnVec(vecY));
