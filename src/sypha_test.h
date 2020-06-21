@@ -10,6 +10,8 @@
 #include "sypha_environment.h"
 #include "sypha_cuda_helper.h"
 
+int test_launcher(SyphaEnvironment &env);
+
 int sypha_test_001();
 
 #endif // SYPHA_TEST_H

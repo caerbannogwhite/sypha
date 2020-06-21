@@ -15,6 +15,7 @@ class SyphaNodeSparse;
 class SyphaEnvironment
 {
 private:
+    SyphaStatus internalStatus;
     string test;
     string inputFilePath;
     ModelInputType modelType;
@@ -41,7 +42,11 @@ public:
     SyphaEnvironment();
     SyphaEnvironment(int argc, char *argv[]);
 
+    int getVerbosityLevel();
     std::string getTest();
+    SyphaStatus getStatus();
+
+    double timer();
 
     SyphaStatus setDefaultParameters();
     SyphaStatus setUpDevice();
@@ -58,6 +63,8 @@ public:
     friend SyphaStatus solver_sparse_merhrotra_init_1(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_merhrotra_init_gsl(SyphaNodeSparse &node);
+
+    friend int test_launcher(SyphaEnvironment &env);
 };
 
 #endif // SYPHA_ENVIRONMENT_H

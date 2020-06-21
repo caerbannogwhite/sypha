@@ -1,5 +1,10 @@
 #include "sypha_test.h"
 
+int test_launcher(SyphaEnvironment &env)
+{
+
+}
+
 int sypha_test_001()
 {
     cudaStream_t cudaStream;
@@ -142,3 +147,4 @@ int sypha_test_001()
     if (cudaStream)
         checkCudaErrors(cudaStreamDestroy(cudaStream));
 }
+

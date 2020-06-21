@@ -14,7 +14,7 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
     if (!fscanf(inputFileHandler, "%d %d", &node.nrows, &node.ncols))
     {
         node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
-        return CODE_ERROR;
+        return CODE_GENERIC_ERROR;
     }
 
     sprintf(message, "Original model has %d rows and %d columns", node.nrows, node.ncols);
@@ -31,7 +31,7 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
         if (!fscanf(inputFileHandler, "%lf", &val))
         {
             node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
-            return CODE_ERROR;
+            return CODE_GENERIC_ERROR;
         }
         node.h_ObjDns[j] = val;
     }
@@ -42,7 +42,7 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
         if (!fscanf(inputFileHandler, "%d", &currColNumber))
         {
             node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
-            return CODE_ERROR;
+            return CODE_GENERIC_ERROR;
         }
 
         nnz += currColNumber;
@@ -51,7 +51,7 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
             if (!fscanf(inputFileHandler, "%d", &idx))
             {
                 node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
-                return CODE_ERROR;
+                return CODE_GENERIC_ERROR;
             }
             node.h_MatDns[i*ncolsAS + idx - 1] = 1.0;
         }
@@ -103,7 +103,7 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
     if (!fscanf(inputFileHandler, "%d %d", &node.nrows, &node.ncols))
     {
         node.env->logger("model_reader_read_scp_file_sparse_coo: fscanf failed.", "ERROR", 0);
-        return CODE_ERROR;
+        return CODE_GENERIC_ERROR;
     }
 
     node.h_ObjDns = (double *)calloc(node.ncols + node.nrows, sizeof(double));
@@ -115,7 +115,7 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
         if (!fscanf(inputFileHandler, "%lf", &val))
         {
             node.env->logger("model_reader_read_scp_file_sparse_coo: fscanf failed.", "ERROR", 0);
-            return CODE_ERROR;
+            return CODE_GENERIC_ERROR;
         }
         node.h_ObjDns[j] = val;
     }
@@ -126,7 +126,7 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
         if (!fscanf(inputFileHandler, "%d", &currColNumber))
         {
             node.env->logger("model_reader_read_scp_file_sparse_coo: fscanf failed.", "ERROR", 0);
-            return CODE_ERROR;
+            return CODE_GENERIC_ERROR;
         }
 
         for (j = 0; j < currColNumber; ++j)
@@ -134,7 +134,7 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
             if (!fscanf(inputFileHandler, "%d", &idx))
             {
                 node.env->logger("model_reader_read_scp_file_sparse_coo: fscanf failed.", "ERROR", 0);
-                return CODE_ERROR;
+                return CODE_GENERIC_ERROR;
             }
 
             node.h_cooMat->push_back(SyphaCOOEntry(i, idx-1, 1.0));
@@ -191,7 +191,7 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
     if (!fscanf(inputFileHandler, "%d %d", &node.nrows, &node.ncols))
     {
         node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
-        return CODE_ERROR;
+        return CODE_GENERIC_ERROR;
     }
 
     node.h_ObjDns = (double *)calloc(node.ncols + node.nrows, sizeof(double));
@@ -206,7 +206,7 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
         if (!fscanf(inputFileHandler, "%lf", &val))
         {
             node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
-            return CODE_ERROR;
+            return CODE_GENERIC_ERROR;
         }
         node.h_ObjDns[j] = val;
     }
@@ -219,7 +219,7 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
         if (!fscanf(inputFileHandler, "%d", &currColNumber))
         {
             node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
-            return CODE_ERROR;
+            return CODE_GENERIC_ERROR;
         }
 
         // add 1 for the element in matrix S
@@ -230,7 +230,7 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
             if (!fscanf(inputFileHandler, "%d", &idx))
             {
                 node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
-                return CODE_ERROR;
+                return CODE_GENERIC_ERROR;
             }
             node.h_csrMatInds->push_back(idx - 1);
             node.h_csrMatVals->push_back(1.0);

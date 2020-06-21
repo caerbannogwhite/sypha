@@ -28,7 +28,8 @@ private:
     int ncols;
     int nrows;
     int nnz;
-    double objval;
+    double objvalPrim;
+    double objvalDual;
 
     vector<SyphaCOOEntry> *h_cooMat;
 
@@ -53,6 +54,9 @@ private:
     double *d_y;
     double *d_s;
 
+    double timeSolverEnd;
+    double timeSolverStart;
+
     cusparseSpMatDescr_t matDescr;
     cusparseSpMatDescr_t matTransDescr;
     cusparseDnVecDescr_t objDescr;
@@ -73,7 +77,10 @@ public:
     int getNumCols();
     int getNumRows();
     int getNumNonZero();
-    double getObjval();
+    double getObjvalPrim();
+    double getObjvalDual();
+    double getTimeSolverEnd();
+    double getTimeSolverStart();
     SyphaStatus solve();
     SyphaStatus readModel();
     SyphaStatus copyModelOnDevice();

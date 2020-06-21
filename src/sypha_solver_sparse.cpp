@@ -10,7 +10,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     size_t bufferSize = 0;
     size_t currBufferSize = 0;
     double alpha, beta, alphaPrim, alphaDual, sigma, mu, muAff;
-    double alphaMaxPrim, alphaMaxDual, objValPrim, objValDual;
+    double alphaMaxPrim, alphaMaxDual;
     double *d_bufferX = NULL;
     double *d_bufferS = NULL;
     double *d_ones = NULL;
@@ -291,6 +291,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     ///////////////////             MAIN LOOP
 
     node.env->logger("Starting Merhrotra proceduce", "INFO", 17);
+    node.timeSolverStart = node.env->timer();
     while ((iterations < node.env->MERHROTRA_MAX_ITER) && (mu > node.env->MERHROTRA_MU_TOL))
     {
 
@@ -501,16 +502,17 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     }
 
     checkCudaErrors(cublasDdot(node.cublasHandle, node.ncols,
-                               d_x, 1, node.d_ObjDns, 1, &objValPrim));
+                               d_x, 1, node.d_ObjDns, 1, &node.objvalPrim));
 
     checkCudaErrors(cublasDdot(node.cublasHandle, node.nrows,
-                               d_y, 1, node.d_RhsDns, 1, &objValDual));
+                               d_y, 1, node.d_RhsDns, 1, &node.objvalDual));
 
     node.env->logger("Merhrotra procedure complete", "INFO", 10);
+    node.timeSolverEnd = node.env->timer();
 
-    sprintf(message, "Primal: %10.4lf, Dual: %10.4lf, iterations: %d", objValPrim, objValDual, iterations);
+    sprintf(message, "Primal: %10.4lf, Dual: %10.4lf, iterations: %d", node.objvalPrim, node.objvalDual, iterations);
     node.env->logger(message, "INFO", 5);
-
+    
     ///////////////////             RELEASE RESOURCES
 
     checkCudaErrors(cusparseDestroyMatDescr(A_descr));

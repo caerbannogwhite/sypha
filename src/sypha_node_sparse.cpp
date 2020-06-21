@@ -15,7 +15,8 @@ SyphaNodeSparse::SyphaNodeSparse(SyphaEnvironment &env)
     this->ncols = 0;
     this->nrows = 0;
     this->nnz = 0;
-    this->objval = 0.0;
+    this->objvalPrim = 0.0;
+    this->objvalDual = 0.0;
 
     this->h_cooMat = new std::vector<SyphaCOOEntry>();
 
@@ -114,16 +115,29 @@ int SyphaNodeSparse::getNumNonZero()
     return this->nnz;
 }
 
-double SyphaNodeSparse::getObjval()
+double SyphaNodeSparse::getObjvalPrim()
 {
-    return this->objval;
+    return this->objvalPrim;
+}
+
+double SyphaNodeSparse::getObjvalDual()
+{
+    return this->objvalDual;
+}
+
+double SyphaNodeSparse::getTimeSolverEnd()
+{
+    return this->timeSolverEnd;
+}
+
+double SyphaNodeSparse::getTimeSolverStart()
+{
+    return this->timeSolverStart;
 }
 
 SyphaStatus SyphaNodeSparse::solve()
 {
-    solver_sparse_merhrotra(*this);
-
-    return CODE_SUCCESFULL;
+    return solver_sparse_merhrotra(*this);
 }
 
 SyphaStatus SyphaNodeSparse::readModel()
@@ -131,11 +145,10 @@ SyphaStatus SyphaNodeSparse::readModel()
     if (this->env->modelType == MODEL_TYPE_SCP)
     {
         //model_reader_read_scp_file_sparse_coo(*this, this->env->inputFilePath);
-        model_reader_read_scp_file_sparse_csr(*this, this->env->inputFilePath);
+        return model_reader_read_scp_file_sparse_csr(*this, this->env->inputFilePath);
     } else {
         return CODE_MODEL_TYPE_NOT_FOUND;
     }
-    return CODE_SUCCESFULL;
 }
 
 SyphaStatus SyphaNodeSparse::copyModelOnDevice()
@@ -197,12 +210,6 @@ SyphaStatus SyphaNodeSparse::copyModelOnDevice()
 
 SyphaStatus SyphaNodeSparse::setInitValues()
 {
-    this->ncols = 0;
-    this->nrows = 0;
-    this->nnz = 0;
-
-    this->objval = 0.0;
-
     return CODE_SUCCESFULL;
 }
 
