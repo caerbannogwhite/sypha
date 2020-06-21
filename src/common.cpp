@@ -1,8 +1,11 @@
 
 #include "common.h"
 
+#define ZERO_TOL 1.E-20
+
 int utils_printDmat(int m, int n, int l, double *mat, bool device, bool trans)
 {
+    double val;
     double *matLoc;
     if (device)
     {
@@ -22,10 +25,9 @@ int utils_printDmat(int m, int n, int l, double *mat, bool device, bool trans)
         printf("[");
         for (int j = 0; j < l; ++j)
         {
-            if (trans)
-                printf("%8.6lf, ", matLoc[l * j + i]);
-            else
-                printf("%8.6lf, ", matLoc[l * i + j]);
+            val = trans ? matLoc[l * j + i] : matLoc[l * i + j];
+            val = abs(val) < ZERO_TOL ? 0.0 : val;
+            printf("%8.6lf, ", val);
         }
         printf("],\n");
     }
@@ -69,6 +71,7 @@ int utils_printIvec(int n, int *vec, bool device)
 
 int utils_printDvec(int n, double *vec, bool device)
 {
+    double val;
     double *vecLoc;
     if (device)
     {
@@ -83,7 +86,8 @@ int utils_printDvec(int n, double *vec, bool device)
     printf("[");
     for (int i = 0; i < n; ++i)
     {
-        printf("%8.6lf, ", vecLoc[i]);
+        val = abs(vecLoc[i]) < ZERO_TOL ? 0.0 : vecLoc[i];
+        printf("%8.6lf, ", val);
     }
     printf("]\n");
 

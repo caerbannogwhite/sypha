@@ -43,30 +43,28 @@ def launch(path, instance, sparse=False):
     return flag
 
 
-path = Path(f"/home/macs/coding/optimization/sypha/data/demo00.txt")
-launch(path, "demo00", sparse=False)
-exit()
-
-#path = Path("C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\ex_balas1.txt")
-path = Path(f"/home/macs/coding/optimization/sypha/data/ex_balas1.txt")
-launch(path, "ex_balas1", sparse=False)
-#exit()
+# path = Path(f"/home/macs/coding/optimization/sypha/data/demo00.txt")
+# launch(path, "demo00", sparse=False)
+# 
+# #path = Path("C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\ex_balas1.txt")
+# path = Path(f"/home/macs/coding/optimization/sypha/data/ex_balas1.txt")
+# launch(path, "ex_balas1", sparse=False)
 
 counter = 0
 counter_ok = 0
-for i in range(50):
-    #path = Path(f"C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scp_demo{i:02d}.txt")
-    path = Path(f"/home/macs/coding/optimization/sypha/data/scp_demo{i:02d}.txt")
-    counter += 1
-    if launch(path, f"scp_demo{i:02d}", sparse=False):
-        counter_ok += 1
+# for i in range(50):
+#     #path = Path(f"C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scp_demo{i:02d}.txt")
+#     path = Path(f"/home/macs/coding/optimization/sypha/data/scp_demo{i:02d}.txt")
+#     counter += 1
+#     if launch(path, f"scp_demo{i:02d}", sparse=False):
+#         counter_ok += 1
 
-#for i in range(10):
-#    #path = Path(f"C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scp4{i+1}.txt")
-#    path = Path(f"/home/macs/coding/optimization/sypha/data/scp4{i+1}.txt")
-#    counter += 1
-#    if launch(path, "scp4{:d}".format(i+1), sparse=False):
-#        counter_ok += 1
+for i in range(10):
+    #path = Path(f"C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scp4{i+1}.txt")
+    path = Path(f"/home/macs/coding/optimization/sypha/data/scp4{i+1}.txt")
+    counter += 1
+    if launch(path, "scp4{:d}".format(i+1), sparse=True):
+        counter_ok += 1
 
 #for i in range(10):
 #    path = Path("C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scp5{:d}.txt".format(i+1))

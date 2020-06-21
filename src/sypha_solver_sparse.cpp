@@ -312,7 +312,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
                                             d_sol, &singularity));
 
         ///////////////             TEST
-        printf("\n%4d) AFTER AFFINE SYSTEM\n", iterations);
+        /*printf("\n%4d) AFTER AFFINE SYSTEM\n", iterations);
         double *d_ADn = NULL;
         checkCudaErrors(cudaMalloc((void **)&d_ADn, sizeof(double) * A_nrows * A_ncols));
 
@@ -327,7 +327,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
         printf("sol:\n");
         utils_printDvec(node.ncols * 2 + node.nrows, d_sol, true);
         printf("rhs:\n");
-        utils_printDvec(node.ncols * 2 + node.nrows, d_rhs, true);
+        utils_printDvec(node.ncols * 2 + node.nrows, d_rhs, true);*/
         ///////////////             END TEST
 
         // affine step length, definition 14.32 at page 408(427)
@@ -411,11 +411,11 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
                                             d_sol, &singularity));
                                             
         ///////////////             TEST
-        printf("\n%4d) AFTER CORRECTION SYSTEM\n", iterations);
-        printf("sol:\n");
-        utils_printDvec(node.ncols * 2 + node.nrows, d_sol, true);
-        printf("rhs:\n");
-        utils_printDvec(node.ncols * 2 + node.nrows, d_rhs, true);
+        // printf("\n%4d) AFTER CORRECTION SYSTEM\n", iterations);
+        // printf("sol:\n");
+        // utils_printDvec(node.ncols * 2 + node.nrows, d_sol, true);
+        // printf("rhs:\n");
+        // utils_printDvec(node.ncols * 2 + node.nrows, d_rhs, true);
         ///////////////             END TEST
 
         // finding alphaMaxPrim and alphaMaxDual: to improve
@@ -436,7 +436,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
             if (beta < 0.0)
             {
                 alpha = -(alpha / beta);
-                alphaMaxPrim = alphaMaxPrim < alpha ? alphaMaxPrim : alpha;
+                alphaMaxDual = alphaMaxDual < alpha ? alphaMaxDual : alpha;
             }
         }
 
@@ -470,8 +470,8 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
         mu /= node.ncols;
         
         ///////////////             TEST
-        printf("\n%4d) UPDATE STEP\n", iterations);
-        printf("mu: %8.6lf, al prim: %8.6lf, al dual: %8.6lf\n", mu, alphaPrim, alphaDual);
+        // printf("\n%4d) UPDATE STEP\n", iterations);
+        // printf("mu: %8.6lf, al prim: %8.6lf, al max prim: %8.6lf, al dual: %8.6lf, al max dual: %8.6lf\n", mu, alphaPrim, alphaMaxPrim, alphaDual, alphaMaxDual);
         ///////////////             END TEST
 
         // update x and s on matrix

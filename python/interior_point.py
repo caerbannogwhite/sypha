@@ -347,7 +347,8 @@ def mehrotra_linopt_dense_test(mat: numpy.array,
         mu = x.dot(s) / float(n)
 
         print(f"\n{iterations:4d}) UPDATE STEP")
-        print(f"mu: {mu:8.6f}, al prim: {alpha_p:8.6f}, al dual: {alpha_d:8.6f}")
+        print(
+            f"mu: {mu:8.6f}, al prim: {alpha_p:8.6f}, al max prim: {alpha_max_p:8.6f}, al dual: {alpha_d:8.6f}, al max dual: {alpha_max_d:8.6f}")
 
 
         # print(f"\n\n{iterations:4d}) LOOP END")
