@@ -1,7 +1,7 @@
 
 #include "common.h"
 
-int utils_printDmat(int m, int n, int l, double *mat, bool device)
+int utils_printDmat(int m, int n, int l, double *mat, bool device, bool trans)
 {
     double *matLoc;
     if (device)
@@ -14,13 +14,18 @@ int utils_printDmat(int m, int n, int l, double *mat, bool device)
         matLoc = mat;
     }
 
+    m = trans ? l : m;
+    l = trans ? m : l;
     printf("[");
     for (int i = 0; i < m; ++i)
     {
         printf("[");
         for (int j = 0; j < l; ++j)
         {
-            printf("%8.6lf, ", matLoc[l * i + j]);
+            if (trans)
+                printf("%8.6lf, ", matLoc[l * j + i]);
+            else
+                printf("%8.6lf, ", matLoc[l * i + j]);
         }
         printf("],\n");
     }

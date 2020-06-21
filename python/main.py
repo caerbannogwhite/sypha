@@ -25,7 +25,8 @@ def launch(path, instance, sparse=False):
         if sparse:
             x, y, s, iterations = mehrotra_linopt_sparse(mat, rhs, obj)
         else:
-            x, y, s, iterations = mehrotra_linopt_dense(mat, rhs, obj)
+            #x, y, s, iterations = mehrotra_linopt_dense(mat, rhs, obj)
+            x, y, s, iterations = mehrotra_linopt_dense_test(mat, rhs, obj)
 
         upp = x[:n-m].dot(obj[:n-m])
         low = y.dot(rhs)
@@ -41,17 +42,24 @@ def launch(path, instance, sparse=False):
     del mat, rhs, obj
     return flag
 
+
+path = Path(f"/home/macs/coding/optimization/sypha/data/demo00.txt")
+launch(path, "demo00", sparse=False)
+exit()
+
 #path = Path("C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\ex_balas1.txt")
 path = Path(f"/home/macs/coding/optimization/sypha/data/ex_balas1.txt")
-launch(path, "ex_balas1")
+launch(path, "ex_balas1", sparse=False)
+#exit()
 
 counter = 0
 counter_ok = 0
-#for i in range(50):
-#    path = Path("C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scp_demo{:02d}.txt".format(i))
-#    counter += 1
-#    if launch(path, f"scp_demo{i:02d}", sparse=True):
-#        counter_ok += 1
+for i in range(50):
+    #path = Path(f"C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scp_demo{i:02d}.txt")
+    path = Path(f"/home/macs/coding/optimization/sypha/data/scp_demo{i:02d}.txt")
+    counter += 1
+    if launch(path, f"scp_demo{i:02d}", sparse=False):
+        counter_ok += 1
 
 #for i in range(10):
 #    #path = Path(f"C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scp4{i+1}.txt")
@@ -66,11 +74,11 @@ counter_ok = 0
 #    if launch(path, f"scp5{i+1:d}", sparse=True):
 #        counter_ok += 1
 
-for p in product(["e", "f",], range(1,6)):
-    #path = Path("C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scpnr{}{}.txt".format(*p))
-    path = Path("/home/macs/coding/optimization/sypha/data/scpnr{}{}.txt".format(*p))
-    counter += 1
-    if launch(path, "scpnr{}{}.txt".format(*p), sparse=False):
-        counter_ok += 1
+# for p in product(["e", "f",], range(1,6)):
+#     #path = Path("C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\scpnr{}{}.txt".format(*p))
+#     path = Path("/home/macs/coding/optimization/sypha/data/scpnr{}{}.txt".format(*p))
+#     counter += 1
+#     if launch(path, "scpnr{}{}.txt".format(*p), sparse=False):
+#         counter_ok += 1
 
 print(counter, counter_ok)

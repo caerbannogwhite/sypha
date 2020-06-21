@@ -191,12 +191,12 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     // utils_printDmat(A_nrows, A_ncols, A_nrows, d_ADn, true);
     // checkCudaErrors(cudaFree(d_ADn));
 
-    printf("OFFS:\n");
-    utils_printIvec(A_nrows+1, d_csrAOffs, true);
-    printf("INDS:\n");
-    utils_printIvec(A_nnz, d_csrAInds, true);
-    printf("VALS:\n");
-    utils_printDvec(A_nnz, d_csrAVals, true);
+    // printf("OFFS:\n");
+    // utils_printIvec(A_nrows+1, d_csrAOffs, true);
+    // printf("INDS:\n");
+    // utils_printIvec(A_nnz, d_csrAInds, true);
+    // printf("VALS:\n");
+    // utils_printDvec(A_nnz, d_csrAVals, true);
     ///////////////////             END TEST
 
     free(h_csrAInds);
@@ -304,43 +304,30 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
             checkCudaErrors(cudaMemcpy(&d_resXS[j], &alpha, sizeof(double), cudaMemcpyHostToDevice));
         }
 
-        ///////////////             TEST
-        printf("\n\nLOOP START\nmu: %lf\n", mu);
-        printf("X:\n");
-        utils_printDvec(node.ncols, d_x, true);
-        printf("Y:\n");
-        utils_printDvec(node.nrows, d_y, true);
-        printf("S:\n");
-        utils_printDvec(node.ncols, d_s, true);
-        printf("delta X:\n");
-        utils_printDvec(node.ncols, d_deltaX, true);
-        printf("delta S:\n");
-        utils_printDvec(node.ncols, d_deltaS, true);
-        printf("rhs :\n");
-        utils_printDvec(node.ncols*2+node.nrows, d_rhs, true);
-        ///////////////             END TEST
-
-        checkCudaErrors(cusolverSpDcsrlsvchol(node.cusolverSpHandle,
-                                              A_nrows, A_nnz, A_descr,
-                                              d_csrAVals, d_csrAOffs, d_csrAInds,
-                                              d_rhs,
-                                              node.env->MERHROTRA_CHOL_TOL, reorder,
-                                              d_sol, &singularity));
+        checkCudaErrors(cusolverSpDcsrlsvqr(node.cusolverSpHandle,
+                                            A_nrows, A_nnz, A_descr,
+                                            d_csrAVals, d_csrAOffs, d_csrAInds,
+                                            d_rhs,
+                                            node.env->MERHROTRA_CHOL_TOL, reorder,
+                                            d_sol, &singularity));
 
         ///////////////             TEST
-        printf("\n\nAFTER AFFINE SYSTEM\nmu: %lf, sing: %d\n", mu, singularity);
-        printf("X:\n");
-        utils_printDvec(node.ncols, d_x, true);
-        printf("Y:\n");
-        utils_printDvec(node.nrows, d_y, true);
-        printf("S:\n");
-        utils_printDvec(node.ncols, d_s, true);
-        printf("delta X:\n");
-        utils_printDvec(node.ncols, d_deltaX, true);
-        printf("delta S:\n");
-        utils_printDvec(node.ncols, d_deltaS, true);
-        printf("rhs :\n");
-        utils_printDvec(node.ncols*2+node.nrows, d_rhs, true);
+        printf("\n%4d) AFTER AFFINE SYSTEM\n", iterations);
+        double *d_ADn = NULL;
+        checkCudaErrors(cudaMalloc((void **)&d_ADn, sizeof(double) * A_nrows * A_ncols));
+
+        checkCudaErrors(cusparseDcsr2dense(node.cusparseHandle, A_nrows, A_ncols,
+                                           A_descr, // CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO
+                                           d_csrAVals, d_csrAOffs, d_csrAInds,
+                                           d_ADn, A_nrows));
+
+        utils_printDmat(A_nrows, A_ncols, A_nrows, d_ADn, true, true);
+        checkCudaErrors(cudaFree(d_ADn));
+
+        printf("sol:\n");
+        utils_printDvec(node.ncols * 2 + node.nrows, d_sol, true);
+        printf("rhs:\n");
+        utils_printDvec(node.ncols * 2 + node.nrows, d_rhs, true);
         ///////////////             END TEST
 
         // affine step length, definition 14.32 at page 408(427)
@@ -393,6 +380,15 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
         // corrector step or centering parameter
         sigma = gsl_pow_3(muAff / mu);
 
+        ///////////////             TEST
+        // printf("\n\n%4d) PRE CORRECTION SYSTEM\n", iterations);
+        // printf("sigma: %lf, muAff: %lf\n", sigma, muAff);
+        // printf("d buff X:\n");
+        // utils_printDvec(node.ncols, d_bufferX, true);
+        // printf("d buff S:\n");
+        // utils_printDvec(node.ncols, d_bufferS, true);
+        ///////////////             END TEST
+
         // x, s multiplication and res XS update: to improve
         for (j = 0; j < node.ncols; ++j)
         {
@@ -406,12 +402,43 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
         checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
                                     &alpha, d_bufferX, 1, d_resXS, 1));
 
-        checkCudaErrors(cusolverSpDcsrlsvchol(node.cusolverSpHandle,
-                                              A_nrows, A_nnz, A_descr,
-                                              d_csrAVals, d_csrAOffs, d_csrAInds,
-                                              d_rhs,
-                                              node.env->MERHROTRA_CHOL_TOL, reorder,
-                                              d_sol, &singularity));
+
+        checkCudaErrors(cusolverSpDcsrlsvqr(node.cusolverSpHandle,
+                                            A_nrows, A_nnz, A_descr,
+                                            d_csrAVals, d_csrAOffs, d_csrAInds,
+                                            d_rhs,
+                                            node.env->MERHROTRA_CHOL_TOL, reorder,
+                                            d_sol, &singularity));
+                                            
+        ///////////////             TEST
+        printf("\n%4d) AFTER CORRECTION SYSTEM\n", iterations);
+        printf("sol:\n");
+        utils_printDvec(node.ncols * 2 + node.nrows, d_sol, true);
+        printf("rhs:\n");
+        utils_printDvec(node.ncols * 2 + node.nrows, d_rhs, true);
+        ///////////////             END TEST
+
+        // finding alphaMaxPrim and alphaMaxDual: to improve
+        alphaMaxPrim = DBL_MAX;
+        alphaMaxDual = DBL_MAX;
+        for (j = 0; j < node.ncols; ++j)
+        {
+            checkCudaErrors(cudaMemcpy(&alpha, &d_x[j], sizeof(double), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpy(&beta, &d_deltaX[j], sizeof(double), cudaMemcpyDeviceToHost));
+            if (beta < 0.0)
+            {
+                alpha = -(alpha / beta);
+                alphaMaxPrim = alphaMaxPrim < alpha ? alphaMaxPrim : alpha;
+            }
+
+            checkCudaErrors(cudaMemcpy(&alpha, &d_s[j], sizeof(double), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpy(&beta, &d_deltaS[j], sizeof(double), cudaMemcpyDeviceToHost));
+            if (beta < 0.0)
+            {
+                alpha = -(alpha / beta);
+                alphaMaxPrim = alphaMaxPrim < alpha ? alphaMaxPrim : alpha;
+            }
+        }
 
         alphaPrim = gsl_min(1.0, node.env->MERHROTRA_ETA * alphaMaxPrim);
         alphaDual = gsl_min(1.0, node.env->MERHROTRA_ETA * alphaMaxDual);
@@ -430,16 +457,22 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
 
         ///////////////             UPDATE
 
-        alpha = (alphaDual - 1.0);
+        alpha = -(alphaDual - 1.0);
         checkCudaErrors(cublasDscal(node.cublasHandle, node.ncols,
                                     &alpha, d_resC, 1));
 
-        alpha = (alphaPrim - 1.0);
+        alpha = -(alphaPrim - 1.0);
         checkCudaErrors(cublasDscal(node.cublasHandle, node.nrows,
                                     &alpha, d_resB, 1));
 
+
         checkCudaErrors(cublasDdot(node.cublasHandle, node.ncols, d_x, 1, d_s, 1, &mu));
         mu /= node.ncols;
+        
+        ///////////////             TEST
+        printf("\n%4d) UPDATE STEP\n", iterations);
+        printf("mu: %8.6lf, al prim: %8.6lf, al dual: %8.6lf\n", mu, alphaPrim, alphaDual);
+        ///////////////             END TEST
 
         // update x and s on matrix
         off = node.nnz * 2 + node.ncols;
@@ -452,17 +485,18 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
         ++iterations;
 
         ///////////////             TEST
-        printf("\n\nLOOP END\nmu: %lf, sing: %d\n", mu, singularity);
-        printf("X:\n");
-        utils_printDvec(node.ncols, d_x, true);
-        printf("Y:\n");
-        utils_printDvec(node.nrows, d_y, true);
-        printf("S:\n");
-        utils_printDvec(node.ncols, d_s, true);
-        printf("delta X:\n");
-        utils_printDvec(node.ncols, d_deltaX, true);
-        printf("delta S:\n");
-        utils_printDvec(node.ncols, d_deltaS, true);
+        //printf("\n\nLOOP END\n");
+        //printf("al prim: %lf, al dual: %lf, mu: %lf\n", alphaPrim, alphaDual, mu);
+        //printf("X:\n");
+        //utils_printDvec(node.ncols, d_x, true);
+        //printf("Y:\n");
+        //utils_printDvec(node.nrows, d_y, true);
+        //printf("S:\n");
+        //utils_printDvec(node.ncols, d_s, true);
+        //printf("delta X:\n");
+        //utils_printDvec(node.ncols, d_deltaX, true);
+        //printf("delta S:\n");
+        //utils_printDvec(node.ncols, d_deltaS, true);
         ///////////////             END TEST
     }
 
@@ -803,7 +837,7 @@ SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node)
                                      &info));*/
 
     printf("AAT after getrf\n");
-    utils_printDmat(node.nrows, node.nrows, node.nrows, d_AAT, true);
+    utils_printDmat(node.nrows, node.nrows, node.nrows, d_AAT, true, true);
 
     sprintf(message, "solver_sparse_merhrotra_init - cusolverDnGetrf returned %d", info);
     node.env->logger(message, "INFO", 20);
@@ -826,7 +860,7 @@ SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node)
                                      &info));
 
     printf("AAT after getrs\n");
-    utils_printDmat(node.nrows, node.nrows, node.nrows, d_AAT, true);
+    utils_printDmat(node.nrows, node.nrows, node.nrows, d_AAT, true, true);
 
     sprintf(message, "solver_sparse_merhrotra_init - cusolverDnGetrs returned %d", info);
     node.env->logger(message, "INFO", 20);

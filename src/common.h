@@ -32,8 +32,8 @@ enum ModelInputType
     MODEL_TYPE_SCP = 0,
 };
 
-int utils_printDmat(int m, int n, int l, double *mat, bool device);
-int utils_printImat(int m, int n, int l, int *mat, bool device);
+int utils_printDmat(int m, int n, int l, double *mat, bool device, bool trans);
+int utils_printImat(int m, int n, int l, int *mat, bool device, bool trans);
 int utils_printDvec(int n, double *vec, bool device);
 int utils_printIvec(int n, int *vec, bool device);
 
