@@ -49,6 +49,7 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         desc.add_options()
         ("help", "produce help message")
         ("unit-tests", po::value<string>(&this->test)->default_value("none"), "launch unit tests")
+        ("unit-tests-rep", po::value<int>(&this->testRepeat)->default_value(1), "set number of repeats for each test")
         ("input-file", po::value<string>(&this->inputFilePath), "set input file path")
         ("model", po::value<string>(&modelType), "set input model type (scp)")
         ("sparse", po::value<bool>(&this->sparse)->default_value(true), "import model as sparse model")
@@ -67,11 +68,6 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         {
             cout << desc << "\n";
             return CODE_GENERIC_ERROR;
-        }
-
-        if (vm.count("unit-tests"))
-        {
-            cout << "Launch unit tests " << vm["unit-tests"].as<string>() << ".\n";
         }
 
         if (vm.count("input-file"))

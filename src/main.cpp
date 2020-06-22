@@ -56,10 +56,20 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	sprintf(message, "Solver time: %10.4lf ms", (mainNode->getTimeSolverEnd() - mainNode->getTimeSolverStart()));
-	env->logger(message, "INFO", 5);
-	sprintf(message, "Total time:  %10.4lf ms", (env->timer() - timeStart));
-	env->logger(message, "INFO", 3);
+	sprintf(message, "PRIMAL: %30.20lf", mainNode->getObjvalPrim());
+	env->logger(message, "INFO", 0);
+	sprintf(message, "DUAL: %30.20lf", mainNode->getObjvalDual());
+	env->logger(message, "INFO", 0);
+	sprintf(message, "ITERATIONS: %d", mainNode->getIterations());
+	env->logger(message, "INFO", 0);
+	sprintf(message, "TIME START SOL: %15.6lf", mainNode->getTimeStartSol());
+	env->logger(message, "INFO", 0);
+	sprintf(message, "TIME PRE SOL: %15.6lf", mainNode->getTimePreSol());
+	env->logger(message, "INFO", 0);
+	sprintf(message, "TIME SOLVER: %15.6lf", mainNode->getTimeSolver());
+	env->logger(message, "INFO", 0);
+	sprintf(message, "TIME TOTAL:  %15.6lf", (env->timer() - timeStart));
+	env->logger(message, "INFO", 0);
 
 	return 0;
 }

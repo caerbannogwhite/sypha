@@ -115,6 +115,11 @@ int SyphaNodeSparse::getNumNonZero()
     return this->nnz;
 }
 
+int SyphaNodeSparse::getIterations()
+{
+    return this->iterations;
+}
+
 double SyphaNodeSparse::getObjvalPrim()
 {
     return this->objvalPrim;
@@ -125,14 +130,19 @@ double SyphaNodeSparse::getObjvalDual()
     return this->objvalDual;
 }
 
-double SyphaNodeSparse::getTimeSolverEnd()
+double SyphaNodeSparse::getTimeStartSol()
 {
-    return this->timeSolverEnd;
+    return this->timeStartSolEnd - this->timeStartSolStart;
 }
 
-double SyphaNodeSparse::getTimeSolverStart()
+double SyphaNodeSparse::getTimePreSol()
 {
-    return this->timeSolverStart;
+    return this->timePreSolEnd - this->timePreSolStart;
+}
+
+double SyphaNodeSparse::getTimeSolver()
+{
+    return this->timeSolverEnd - this->timeSolverStart;
 }
 
 SyphaStatus SyphaNodeSparse::solve()

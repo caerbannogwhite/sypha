@@ -54,6 +54,11 @@ private:
     double *d_y;
     double *d_s;
 
+    int iterations;
+    double timeStartSolEnd;
+    double timeStartSolStart;
+    double timePreSolEnd;
+    double timePreSolStart;
     double timeSolverEnd;
     double timeSolverStart;
 
@@ -77,10 +82,12 @@ public:
     int getNumCols();
     int getNumRows();
     int getNumNonZero();
+    int getIterations();
     double getObjvalPrim();
     double getObjvalDual();
-    double getTimeSolverEnd();
-    double getTimeSolverStart();
+    double getTimeStartSol();
+    double getTimePreSol();
+    double getTimeSolver();
     SyphaStatus solve();
     SyphaStatus readModel();
     SyphaStatus copyModelOnDevice();

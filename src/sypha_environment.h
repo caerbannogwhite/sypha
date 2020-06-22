@@ -17,6 +17,7 @@ class SyphaEnvironment
 private:
     SyphaStatus internalStatus;
     string test;
+    int testRepeat;
     string inputFilePath;
     ModelInputType modelType;
     bool sparse;
@@ -35,8 +36,8 @@ private:
     // Merhrotra parameters
     int MERHROTRA_MAX_ITER = 1000;
     double MERHROTRA_ETA = 0.9;
-    double MERHROTRA_MU_TOL = 1.E-10;
-    double MERHROTRA_CHOL_TOL = 1.E-16;
+    double MERHROTRA_MU_TOL = 1.E-8;
+    double MERHROTRA_CHOL_TOL = 1.E-8;
 
 public:
     SyphaEnvironment();
@@ -64,7 +65,10 @@ public:
     friend SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_merhrotra_init_gsl(SyphaNodeSparse &node);
 
+    ///////////////////             UNIT TESTS
     friend int test_launcher(SyphaEnvironment &env);
+    friend int sypha_test_scp4(SyphaEnvironment &env, int &pass);
+    friend int sypha_test_scp5(SyphaEnvironment &env, int &pass);
 };
 
 #endif // SYPHA_ENVIRONMENT_H

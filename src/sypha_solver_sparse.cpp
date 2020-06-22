@@ -64,8 +64,9 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     node.h_y = (double *)malloc(sizeof(double) * node.nrows);
     node.h_s = (double *)malloc(sizeof(double) * node.ncols);
 
+    node.timeStartSolStart = node.env->timer();
     solver_sparse_merhrotra_init_gsl(node);
-
+    node.timeStartSolEnd = node.env->timer();
 
     ///////////////////             SET BIG MATRIX ON HOST
     //
@@ -80,6 +81,8 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     // Where A is the model matrix (standard form), I is the n*n identity
     // matrix, S is the n*n s diagonal matrix, X is the n*n diagonal matrix.
     // Total number of non-zero elements is A.nnz * 2 + n * 3
+
+    node.timePreSolStart = node.env->timer();
 
     int A_nrows = node.ncols * 2 + node.nrows;
     int A_ncols = A_nrows;
@@ -288,6 +291,8 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     checkCudaErrors(cublasDdot(node.cublasHandle, node.ncols, d_x, 1, d_s, 1, &mu));
     mu /= node.ncols;
 
+    node.timePreSolEnd = node.env->timer();
+
     ///////////////////             MAIN LOOP
 
     node.env->logger("Starting Merhrotra proceduce", "INFO", 17);
@@ -322,7 +327,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
                                            d_csrAVals, d_csrAOffs, d_csrAInds,
                                            d_ADn, A_nrows));
 
-        utils_printDmat(A_nrows, A_ncols, A_nrows, d_ADn, true, true);
+        // utils_printDmat(A_nrows, A_ncols, A_nrows, d_ADn, true, true);
         checkCudaErrors(cudaFree(d_ADn));
 
         printf("sol:\n");
@@ -501,6 +506,9 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
         ///////////////             END TEST
     }
 
+    
+    node.iterations = iterations;
+    
     checkCudaErrors(cublasDdot(node.cublasHandle, node.ncols,
                                d_x, 1, node.d_ObjDns, 1, &node.objvalPrim));
 
@@ -510,9 +518,6 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     node.env->logger("Merhrotra procedure complete", "INFO", 10);
     node.timeSolverEnd = node.env->timer();
 
-    sprintf(message, "Primal: %10.4lf, Dual: %10.4lf, iterations: %d", node.objvalPrim, node.objvalDual, iterations);
-    node.env->logger(message, "INFO", 5);
-    
     ///////////////////             RELEASE RESOURCES
 
     checkCudaErrors(cusparseDestroyMatDescr(A_descr));
