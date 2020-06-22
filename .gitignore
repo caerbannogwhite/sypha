@@ -1,3 +1,12 @@
+<<<<<<< HEAD
 /.vs/
 /out/
 /python/**/__pycache__/
+=======
+/.vscode/
+/bin/
+/python/__pycache__/
+/papers/CU*
+/papers/cuda_11/
+sypha
+>>>>>>> 3ef587f07a613ff2f85eb188fb61b063bbad8487

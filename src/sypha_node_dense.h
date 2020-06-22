@@ -5,8 +5,6 @@
 
 #include "cublas_v2.h"
 #include "cusolverDn.h"
-#include "cusparse.h"
-#include "cusolverSp.h"
 
 #include "common.h"
 #include "sypha_environment.h"
@@ -17,11 +15,10 @@ class SyphaEnvironment;
 class SyphaNodeDense
 {
 private:
-    bool sparse;
-    int numCols;
-    int numRows;
-    int numNonZero;
-    double objectiveValue;
+    int ncols;
+    int nrows;
+    int nnz;
+    double objval;
     double *h_MatDns;
     double *h_ObjDns;
     double *h_RhsDns;
@@ -29,7 +26,6 @@ private:
     double *d_ObjDns;
     double *d_RhsDns;
 
-    
     SyphaEnvironment *env;
 
     cudaStream_t cudaStream;
@@ -42,20 +38,20 @@ public:
     SyphaNodeDense(SyphaEnvironment &env);
     ~SyphaNodeDense();
 
-    bool isSparse();
     int getNumCols();
     int getNumRows();
     int getNumNonZero();
-    double getObjectiveValue();
+    double getObjval();
     SyphaStatus solve();
-    SyphaStatus importModel();
+    SyphaStatus readModel();
     SyphaStatus copyModelOnDevice();
     SyphaStatus convert2MySimplexForm();
     SyphaStatus setInitValues();
     SyphaStatus setUpCuda();
 
     friend SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputFilePath);
-    friend SyphaStatus model_reader_scp_model_to_standard_dense(SyphaNodeDense &node);
+    friend SyphaStatus solver_dense_merhrotra(SyphaNodeDense &node);
+    friend SyphaStatus solver_dense_merhrotra_init(SyphaNodeDense &node);
 };
 
 #endif // SYPHA_NODE_DENSE_H

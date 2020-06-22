@@ -41,13 +41,15 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         po::options_description desc("Allowed options");
         desc.add_options()
         ("help", "produce help message")
-        ("inputFile", po::value<string>(&this->inputFilePath), "set input file path")
+        ("unit-tests", po::value<string>(&this->test)->default_value("none"), "launch unit tests")
+        ("input-file", po::value<string>(&this->inputFilePath), "set input file path")
         ("model", po::value<string>(&modelType), "set input model type (scp)")
         ("sparse", po::value<bool>(&this->sparse)->default_value(true), "import model as sparse model")
-        ("timeLimit", po::value<double>(&this->timeLimit), "set time limit")
+        ("time-limit", po::value<double>(&this->timeLimit), "set time limit")
         ("seed", po::value<int>(&this->seed), "set random seed")
         ("thread", po::value<int>(&this->threadNum), "set number of thread")
         ("tol", po::value<double>(&this->PX_TOLERANCE)->default_value(1e-8), "set tolerance")
+        ("verbosity", po::value<int>(&this->verbosityLevel)->default_value(5), "set verbosity level")
         ("debug", po::value<int>(&this->DEBUG_LEVEL)->default_value(0), "set debug level");
 
         po::variables_map vm;
@@ -60,9 +62,14 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
             return CODE_ERROR;
         }
 
-        if (vm.count("inputFile"))
+        if (vm.count("unit-tests"))
         {
-            cout << "Input file path set to " << vm["inputFile"].as<string>() << ".\n";
+            cout << "Launch unit tests " << vm["unit-tests"].as<string>() << ".\n";
+        }
+
+        if (vm.count("input-file"))
+        {
+            cout << "Input file path set to " << vm["input-file"].as<string>() << ".\n";
         }
         else
         {
@@ -140,4 +147,9 @@ void SyphaEnvironment::logger(string message, string type, int level)
             cout << colorGreen << "[INFO]" << colorEnd << " " << message << std::endl;
         }
     }
+}
+
+std::string SyphaEnvironment::getTest()
+{
+    return this->test;
 }

@@ -283,8 +283,8 @@ endif
 #	$(EXEC) mkdir -p ../../bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
 #	$(EXEC) cp $@ ../../bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
 
-sypha : common main model_reader sypha_environment sypha_node_dense sypha_node_sparse sypha_solver_sparse
-	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) bin/common.o bin/main.o bin/model_reader.o bin/sypha_environment.o bin/sypha_node_dense.o bin/sypha_node_sparse.o bin/sypha_solver_sparse.o -o $@ $(LIBRARIES)
+sypha : common main model_reader sypha_environment sypha_node_dense sypha_node_sparse sypha_solver_dense sypha_solver_sparse sypha_test
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) bin/common.o bin/main.o bin/model_reader.o bin/sypha_environment.o bin/sypha_node_dense.o bin/sypha_node_sparse.o bin/sypha_solver_dense.o bin/sypha_solver_sparse.o bin/sypha_test.o -o $@ $(LIBRARIES)
 
 common : src/common.cpp
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
@@ -310,17 +310,26 @@ sypha_node_sparse : src/sypha_node_sparse.cpp
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
 	@mv $@.o bin
 
+sypha_solver_dense : src/sypha_solver_dense.cpp
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
+	@mv $@.o bin
+
 sypha_solver_sparse : src/sypha_solver_sparse.cpp
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
 	@mv $@.o bin
 
+sypha_test : src/sypha_test.cpp
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
+	@mv $@.o bin
 
-#cusolver_test : src/cusolver_test.cpp
-#	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $+ $(LIBRARIES)
-#	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) $@.o -o $@ $+ $(LIBRARIES)
+
+# cusolver_test : src/cusolver_test.cpp
+# 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $+ $(LIBRARIES)
+# 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) $@.o -o $@ $+ $(LIBRARIES)
+
 
 run: build
-	$(EXEC) ./sypha
+	$(EXEC) ./sypha --verbosity 100 --model SCP --input-file data/demo00.txt
 
 clean:
 	@rm sypha

@@ -9,33 +9,61 @@
 #include "common.h"
 #include "sypha_environment.h"
 #include "sypha_cuda_helper.h"
-#include "model_reader.h"
 
 class SyphaEnvironment;
+
+class SyphaCOOEntry
+{
+public:
+    SyphaCOOEntry(int r, int c, double v);
+
+    int row;
+    int col;
+    double val;
+};
 
 class SyphaNodeSparse
 {
 private:
-    int numCols;
-    int numRows;
-    int numNonZero;
-    double objectiveValue;
-    int *h_csrMatIndices;
-    int *h_csrMatIndPtrs;
-    double *h_csrMatVals;
+    int ncols;
+    int nrows;
+    int nnz;
+    double objval;
+
+    vector<SyphaCOOEntry> *h_cooMat;
+
+    vector<int> *h_csrMatInds;
+    vector<int> *h_csrMatOffs;
+    vector<double> *h_csrMatVals;
     double *h_ObjDns;
     double *h_RhsDns;
-    int *d_csrMatIndices;
-    int *d_csrMatIndPtrs;
+    double *h_x;
+    double *h_y;
+    double *h_s;
+
+    int *d_csrMatInds;
+    int *d_csrMatOffs;
     double *d_csrMatVals;
+    int *d_csrMatTransInds;
+    int *d_csrMatTransOffs;
+    double *d_csrMatTransVals;
     double *d_ObjDns;
     double *d_RhsDns;
+    double *d_x;
+    double *d_y;
+    double *d_s;
 
-    
+    cusparseSpMatDescr_t matDescr;
+    cusparseSpMatDescr_t matTransDescr;
+    cusparseDnVecDescr_t objDescr;
+    cusparseDnVecDescr_t rhsDescr;
+
     SyphaEnvironment *env;
 
     cudaStream_t cudaStream;
+    cublasHandle_t cublasHandle;
     cusparseHandle_t cusparseHandle;
+    cusolverDnHandle_t cusolverDnHandle;
     cusolverSpHandle_t cusolverSpHandle;
 
 public:
@@ -45,16 +73,19 @@ public:
     int getNumCols();
     int getNumRows();
     int getNumNonZero();
-    double getObjectiveValue();
+    double getObjval();
     SyphaStatus solve();
-    SyphaStatus importModel();
+    SyphaStatus readModel();
     SyphaStatus copyModelOnDevice();
-    SyphaStatus convert2MySimplexForm();
     SyphaStatus setInitValues();
     SyphaStatus setUpCuda();
 
-    friend SyphaStatus model_reader_read_scp_file_sparse(SyphaNodeSparse &node, string inputFilePath);
-    friend SyphaStatus model_reader_scp_model_to_standard_sparse(SyphaNodeSparse &node);
+    friend SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string inputFilePath);
+    friend SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string inputFilePath);
+    friend SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_merhrotra_init_1(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_merhrotra_init_gsl(SyphaNodeSparse &node);
 };
 
 #endif // SYPHA_NODE_SPARSE_H

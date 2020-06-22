@@ -14,37 +14,25 @@ Main features:
 
 ### Node ###
 
-...
-
 A Node object maintains the information to get its sub-model representation (crash procedure) from
 the original model.
 
+### Solver ###
 
+`solver_sparse_merhrotra`
+At each iteration we solve this linear system twice:
+`
+      O | A' | I    x    -rc
+      --|----|---   -    ---
+      A | O  | O  * y  = -rb
+      --|----|---   -    ---
+      S | O  | X    s    -rxs
+`
+`A` is the model matrix (in *standard form*), `I` is the *n * n* identity
+matrix, `S` is the *n * n* `s` diagonal matrix, `X` is the *n * n* `x` diagonal matrix.
+Total number of non-zero elements is *`A.nnz` * 2 + n * 3*.
 
-This README would normally document whatever steps are necessary to get your application up and running.
+## ISSUES ##
 
-### What is this repository for? ###
-
-* Quick summary
-* Version
-* [Learn Markdown](https://bitbucket.org/tutorials/markdowndemo)
-
-### How do I get set up? ###
-
-* Summary of set up
-* Configuration
-* Dependencies
-* Database configuration
-* How to run tests
-* Deployment instructions
-
-### Contribution guidelines ###
-
-* Writing tests
-* Code review
-* Other guidelines
-
-### Who do I talk to? ###
-
-* Repo owner or admin
-* Other community or team contact
+* SYPHA-0001: (sypha_node_sparse) change X, S matrix update phase on `solver_sparse_merhrotra` using cublas copy
+* SYPHA-0002: (sypha_node_sparse) update the procedure to find `alphaMaxPrim` and `alphaMaxDual` on `solver_sparse_merhrotra` using device kernels
