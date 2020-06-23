@@ -1,7 +1,7 @@
 
 #include "sypha_solver_sparse.h"
 
-SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
+SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
 {
     const int reorder = 0;
     int singularity = 0;
@@ -65,7 +65,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     node.h_s = (double *)malloc(sizeof(double) * node.ncols);
 
     node.timeStartSolStart = node.env->timer();
-    solver_sparse_merhrotra_init_gsl(node);
+    solver_sparse_mehrotra_init_gsl(node);
     node.timeStartSolEnd = node.env->timer();
 
     ///////////////////             SET BIG MATRIX ON HOST
@@ -295,9 +295,9 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
 
     ///////////////////             MAIN LOOP
 
-    node.env->logger("Starting Merhrotra proceduce", "INFO", 17);
+    node.env->logger("Starting Mehrotra proceduce", "INFO", 17);
     node.timeSolverStart = node.env->timer();
-    while ((iterations < node.env->MERHROTRA_MAX_ITER) && (mu > node.env->MERHROTRA_MU_TOL))
+    while ((iterations < node.env->MEHROTRA_MAX_ITER) && (mu > node.env->MEHROTRA_MU_TOL))
     {
 
 
@@ -314,7 +314,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
                                             A_nrows, A_nnz, A_descr,
                                             d_csrAVals, d_csrAOffs, d_csrAInds,
                                             d_rhs,
-                                            node.env->MERHROTRA_CHOL_TOL, reorder,
+                                            node.env->MEHROTRA_CHOL_TOL, reorder,
                                             d_sol, &singularity));
 
         ///////////////             TEST
@@ -413,7 +413,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
                                             A_nrows, A_nnz, A_descr,
                                             d_csrAVals, d_csrAOffs, d_csrAInds,
                                             d_rhs,
-                                            node.env->MERHROTRA_CHOL_TOL, reorder,
+                                            node.env->MEHROTRA_CHOL_TOL, reorder,
                                             d_sol, &singularity));
                                             
         ///////////////             TEST
@@ -446,8 +446,8 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
             }
         }
 
-        alphaPrim = gsl_min(1.0, node.env->MERHROTRA_ETA * alphaMaxPrim);
-        alphaDual = gsl_min(1.0, node.env->MERHROTRA_ETA * alphaMaxDual);
+        alphaPrim = gsl_min(1.0, node.env->MEHROTRA_ETA * alphaMaxPrim);
+        alphaDual = gsl_min(1.0, node.env->MEHROTRA_ETA * alphaMaxDual);
 
         // d_deltaX, d_deltaY, d_deltaS are pointees to d_sol
         // the solution of the previous system 
@@ -515,7 +515,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     checkCudaErrors(cublasDdot(node.cublasHandle, node.nrows,
                                d_y, 1, node.d_RhsDns, 1, &node.objvalDual));
 
-    node.env->logger("Merhrotra procedure complete", "INFO", 10);
+    node.env->logger("Mehrotra procedure complete", "INFO", 10);
     node.timeSolverEnd = node.env->timer();
 
     ///////////////////             RELEASE RESOURCES
@@ -553,7 +553,7 @@ SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node)
     return CODE_SUCCESFULL;
 }
 
-SyphaStatus solver_sparse_merhrotra_init_1(SyphaNodeSparse &node)
+SyphaStatus solver_sparse_mehrotra_init_1(SyphaNodeSparse &node)
 {
     const int reorder = 0;
     int singularity = 0;
@@ -674,7 +674,7 @@ SyphaStatus solver_sparse_merhrotra_init_1(SyphaNodeSparse &node)
     checkCudaErrors(cusolverSpDcsrlsvchol(
         node.cusolverSpHandle, AAT_nrows, AAT_nnz,
         AAT_descrGen, AAT_vals, AAT_offs, AAT_inds,
-        (double*)d_b, node.env->MERHROTRA_CHOL_TOL, reorder, (double*)d_x, &singularity));
+        (double*)d_b, node.env->MEHROTRA_CHOL_TOL, reorder, (double*)d_x, &singularity));
 
     checkCudaErrors(cudaFree(d_b));
     checkCudaErrors(cudaFree(d_x));*/
@@ -734,7 +734,7 @@ SyphaStatus solver_sparse_merhrotra_init_1(SyphaNodeSparse &node)
     return CODE_SUCCESFULL;
 }
 
-SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node)
+SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node)
 {
     const int reorder = 0;
     int singularity = 0;
@@ -760,7 +760,7 @@ SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node)
     cusparseDnMatDescr_t AAT_descr, matDnDescr;
     cusparseMatDescr_t matDescrGen;
 
-    node.env->logger("Merhrotra starting point computation", "INFO", 13);
+    node.env->logger("Mehrotra starting point computation", "INFO", 13);
     checkCudaErrors(cusolverDnCreateParams(&cusolverDnParams));
 
     checkCudaErrors(cusparseCreateMatDescr(&matDescrGen));
@@ -788,7 +788,7 @@ SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node)
                                         CUSPARSE_ORDER_COL));
 
     ///////////////////             STORE MATRIX IN DENSE FORMAT
-    node.env->logger("solver_sparse_merhrotra_init - storing matrix in dense format", "INFO", 20);
+    node.env->logger("solver_sparse_mehrotra_init - storing matrix in dense format", "INFO", 20);
     checkCudaErrors(cusparseDcsr2dense(node.cusparseHandle, node.nrows, node.ncols,
                                        matDescrGen, // CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO
                                        node.d_csrMatVals, node.d_csrMatOffs, node.d_csrMatInds,
@@ -797,7 +797,7 @@ SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node)
     ///////////////////             COMPUTE AAT INVERSE MATRIX
 
     // GEMM Computation: MATRIX * MATRIX'
-    node.env->logger("solver_sparse_merhrotra_init - computing mat * mat'", "INFO", 20);
+    node.env->logger("solver_sparse_mehrotra_init - computing mat * mat'", "INFO", 20);
     checkCudaErrors(cusparseSpMM_bufferSize(node.cusparseHandle,
                                             CUSPARSE_OPERATION_NON_TRANSPOSE,
                                             CUSPARSE_OPERATION_TRANSPOSE,
@@ -822,7 +822,7 @@ SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node)
 
     ///////////////////             MATRIX INVERSION
 
-    node.env->logger("solver_sparse_merhrotra_init - computing matrix inversion", "INFO", 20);
+    node.env->logger("solver_sparse_mehrotra_init - computing matrix inversion", "INFO", 20);
     // See https://stackoverflow.com/questions/50892906/what-is-the-most-efficient-way-to-compute-the-inverse-of-a-general-matrix-using
     checkCudaErrors(cusolverDnDgetrf_bufferSize(node.cusolverDnHandle,
                                                 node.nrows, node.nrows,
@@ -846,7 +846,7 @@ SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node)
     printf("AAT after getrf\n");
     utils_printDmat(node.nrows, node.nrows, node.nrows, d_AAT, true, true);
 
-    sprintf(message, "solver_sparse_merhrotra_init - cusolverDnGetrf returned %d", info);
+    sprintf(message, "solver_sparse_mehrotra_init - cusolverDnGetrf returned %d", info);
     node.env->logger(message, "INFO", 20);
 
     // set I matrix
@@ -869,7 +869,7 @@ SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node)
     printf("AAT after getrs\n");
     utils_printDmat(node.nrows, node.nrows, node.nrows, d_AAT, true, true);
 
-    sprintf(message, "solver_sparse_merhrotra_init - cusolverDnGetrs returned %d", info);
+    sprintf(message, "solver_sparse_mehrotra_init - cusolverDnGetrs returned %d", info);
     node.env->logger(message, "INFO", 20);
 
     /*void *d_b, *d_x;
@@ -879,13 +879,13 @@ SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node)
     checkCudaErrors(cusolverSpDcsrlsvchol(
         node.cusolverSpHandle, AAT_nrows, AAT_nnz,
         matDescrGen, AAT_vals, AAT_offs, AAT_inds,
-        (double*)d_b, node.env->MERHROTRA_CHOL_TOL, reorder, (double*)d_x, &singularity));
+        (double*)d_b, node.env->MEHROTRA_CHOL_TOL, reorder, (double*)d_x, &singularity));
 
     checkCudaErrors(cudaFree(d_b));
     checkCudaErrors(cudaFree(d_x));*/
 
     ///////////////////             COMPUTE s = - mat' * y + obj
-    node.env->logger("solver_sparse_merhrotra_init - computing s = - mat' * y + obj", "INFO", 20);
+    node.env->logger("solver_sparse_mehrotra_init - computing s = - mat' * y + obj", "INFO", 20);
     alpha = -1.0;
     beta = 1.0;
 
@@ -933,7 +933,7 @@ SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node)
     return CODE_SUCCESFULL;
 }
 
-SyphaStatus solver_sparse_merhrotra_init_gsl(SyphaNodeSparse &node)
+SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node)
 {
     int i, j;
     int signum = 0;
@@ -968,7 +968,7 @@ SyphaStatus solver_sparse_merhrotra_init_gsl(SyphaNodeSparse &node)
     //utils_printDmat(node.nrows, node.ncols, node.ncols, mat->data, false);
 
     ///////////////////             MATRIX MULT
-    node.env->logger("solver_sparse_merhrotra_init - computing A * A'", "INFO", 20);
+    node.env->logger("solver_sparse_mehrotra_init - computing A * A'", "INFO", 20);
     mat->size1 = node.nrows;
     mat->size2 = node.ncols;
     mat->tda = node.ncols;
@@ -981,7 +981,7 @@ SyphaStatus solver_sparse_merhrotra_init_gsl(SyphaNodeSparse &node)
     //utils_printDmat(node.nrows, node.nrows, node.ncols, tmp->data, false);
 
     ///////////////////             MATRIX INVERSION
-    node.env->logger("solver_sparse_merhrotra_init - computing inv(AAT)", "INFO", 20);
+    node.env->logger("solver_sparse_mehrotra_init - computing inv(AAT)", "INFO", 20);
     
     inv->size1 = node.nrows;
     inv->size2 = node.nrows;
@@ -993,7 +993,7 @@ SyphaStatus solver_sparse_merhrotra_init_gsl(SyphaNodeSparse &node)
     //utils_printDmat(node.nrows, node.nrows, node.nrows, inv->data, false);
 
     ///////////////////             COMPUTE x = mat' * AAT_inv * rhs
-    node.env->logger("solver_sparse_merhrotra_init - computing x <-- A' * inv(AAT) * rhs", "INFO", 20);
+    node.env->logger("solver_sparse_mehrotra_init - computing x <-- A' * inv(AAT) * rhs", "INFO", 20);
 
     tmp->size1 = node.ncols;
     tmp->size2 = node.nrows;
@@ -1008,7 +1008,7 @@ SyphaStatus solver_sparse_merhrotra_init_gsl(SyphaNodeSparse &node)
     //utils_printDmat(node.ncols, node.nrows, node.nrows, tmp->data, false);
 
     ///////////////////             COMPUTE y = AAT_inv * mat * obj
-    node.env->logger("solver_sparse_merhrotra_init - computing y <-- inv(AAT) * A * obj", "INFO", 20);
+    node.env->logger("solver_sparse_mehrotra_init - computing y <-- inv(AAT) * A * obj", "INFO", 20);
 
     tmp->size1 = node.nrows;
     tmp->size2 = node.ncols;
@@ -1024,7 +1024,7 @@ SyphaStatus solver_sparse_merhrotra_init_gsl(SyphaNodeSparse &node)
     //utils_printDmat(node.ncols, node.nrows, node.nrows, tmp->data, false);
 
     ///////////////////             COMPUTE s = - mat' * y + obj
-    node.env->logger("solver_sparse_merhrotra_init - computing s <-- obj - A' * y", "INFO", 20);
+    node.env->logger("solver_sparse_mehrotra_init - computing s <-- obj - A' * y", "INFO", 20);
     gsl_blas_dgemv(CblasTrans, -1.0, mat, y, 1.0, s);
 
     deltaX = gsl_max(-1.5 * gsl_vector_min(x), 0.0);

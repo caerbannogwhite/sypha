@@ -91,12 +91,15 @@ def exec_sypha(inst, solution, repeat):
                   f"--input-file {BASE_DIR}/data/{inst}.txt > {log_file_name}")
     
         file_handler = open(log_file_name, "r")
+        accept_prim = False
+        accept_dual = False
         for row in file_handler:
             if "PRIMAL" in row:
                 p, prim = row.split(":")
-
+                accept_prim = abs(float(prim) - solution) < ACCEPT_TOL
             elif "DUAL" in row:
                 p, dual = row.split(":")
+                accept_dual = abs(float(dual) - solution) < ACCEPT_TOL
             elif "ITERATIONS" in row:
                 p, val = row.split(":")
                 iterations.append(int(val))
@@ -113,12 +116,10 @@ def exec_sypha(inst, solution, repeat):
                 p, val = row.split(":")
                 total_times.append(float(val) / 1000)
 
-            prim = float(prim)
-            dual = float(dual)
-            if abs(prim - solution) < ACCEPT_TOL and abs(dual - solution) < ACCEPT_TOL:
-                pass_cnt += 1
-            else:
-                fail_cnt += 1
+        if accept_prim and accept_dual:
+            pass_cnt += 1
+        else:
+            fail_cnt += 1
 
         file_handler.close()
     
@@ -194,4 +195,4 @@ if __name__ == "__main__":
     # parser.add_argument("--test-match", type=str, help="")
     # parser.add_argument("--repeat", type=int, help="Number of repetition")
 
-    launch_tests("scp4[2-3]", 3)
+    launch_tests("scp[4-5]*", 3)
