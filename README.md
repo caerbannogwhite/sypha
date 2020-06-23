@@ -41,3 +41,5 @@ Total number of non-zero elements is *`A.nnz` * 2 + n * 3*.
 * SYPHA-3: `sypha_node_sparse` - improve initialization of big matrix A
 * SYPHA-4: `sypha_node_sparse` - develop the Merhrotra procedure not using the big matrix A and test performances
 * SYPHA-5: check file path before reading it
+* SYPHA-6: add a good logger to the environment
+* SYPHA-7: add an web API interface

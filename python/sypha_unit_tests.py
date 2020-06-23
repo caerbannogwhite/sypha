@@ -4,6 +4,7 @@ import os
 from statistics import mean, stdev
 from argparse import ArgumentParser
 
+ACCEPT_TOL = 1.E-4
 BASE_DIR = "/home/macs/coding/optimization/sypha"
 
 SCP4_STRINGS = [f"scp4{i+1:d}" for i in range(10)]
@@ -79,7 +80,6 @@ def exec_sypha(inst, solution, repeat):
 
     pass_cnt = 0
     fail_cnt = 0
-    repeat = 0
     iterations = []
     start_sol_times = []
     pre_sol_times = []
@@ -87,13 +87,14 @@ def exec_sypha(inst, solution, repeat):
     total_times = []
 
     for _ in range(repeat):
-        os.system(f".{BASE_DIR}/sypha --model SCP --verbosity 1"
+        os.system(f"{BASE_DIR}/sypha --model SCP --verbosity 1 "
                   f"--input-file {BASE_DIR}/data/{inst}.txt > {log_file_name}")
     
         file_handler = open(log_file_name, "r")
         for row in file_handler:
             if "PRIMAL" in row:
                 p, prim = row.split(":")
+
             elif "DUAL" in row:
                 p, dual = row.split(":")
             elif "ITERATIONS" in row:
@@ -101,21 +102,30 @@ def exec_sypha(inst, solution, repeat):
                 iterations.append(int(val))
             elif "TIME START SOL" in row:
                 p, val = row.split(":")
-                start_sol_times.append(float(val))
+                start_sol_times.append(float(val) / 1000)
             elif "TIME PRE SOL" in row:
                 p, val = row.split(":")
-                pre_sol_times.append(float(val))
+                pre_sol_times.append(float(val) / 1000)
             elif "TIME SOLVER" in row:
                 p, val = row.split(":")
-                solver_times.append(float(val))
+                solver_times.append(float(val) / 1000)
             elif "TIME TOTAL" in row:
                 p, val = row.split(":")
-                total_times.append(float(val))
+                total_times.append(float(val) / 1000)
+
+            prim = float(prim)
+            dual = float(dual)
+            if abs(prim - solution) < ACCEPT_TOL and abs(dual - solution) < ACCEPT_TOL:
+                pass_cnt += 1
+            else:
+                fail_cnt += 1
 
         file_handler.close()
     
+    data["inst"] = inst
     data["pass"] = pass_cnt
     data["fail"] = fail_cnt
+    data["repeat"] = repeat
     data["iterations_mean"] = mean(iterations)
     data["start_sol_time_mean"] = mean(start_sol_times)
     data["start_sol_time_std"] = stdev(start_sol_times)
@@ -136,9 +146,10 @@ def launch_tests(match, repeat):
     # header
     log_file.write(",".join([
         "INST",
-        "SOLVER TIME MEAN",
+        "ITER MEAN",
+        "SOLVER TIME MEAN (s)",
         "SOLVER TIME STD",
-        "TOTAL TIME MEAN",
+        "TOTAL TIME MEAN (s)",
         "TOTAL TIME STD",
         "REP",
         "PASS",
@@ -148,16 +159,32 @@ def launch_tests(match, repeat):
     for i, instance in enumerate(SCP4_STRINGS):
         if re.match(match, instance):
             res = exec_sypha(instance, SCP4_SOLUTIONS[i], repeat)
-            log_file.write(",".join([
-                instance,
+            log_file.write(",".join(map(str, [
+                res["inst"],
+                res["iterations_mean"],
                 res["solver_time_mean"],
                 res["solver_time_std"],
                 res["total_time_mean"],
                 res["total_time_std"],
-                repeat,
+                res["repeat"],
                 res["pass"],
                 res["fail"]
-            ]) + "\n")
+            ])) + "\n")
+
+    for i, instance in enumerate(SCP5_STRINGS):
+        if re.match(match, instance):
+            res = exec_sypha(instance, SCP5_SOLUTIONS[i], repeat)
+            log_file.write(",".join(map(str, [
+                res["inst"],
+                res["iterations_mean"],
+                res["solver_time_mean"],
+                res["solver_time_std"],
+                res["total_time_mean"],
+                res["total_time_std"],
+                res["repeat"],
+                res["pass"],
+                res["fail"]
+            ])) + "\n")
 
     log_file.close()
 
@@ -167,4 +194,4 @@ if __name__ == "__main__":
     # parser.add_argument("--test-match", type=str, help="")
     # parser.add_argument("--repeat", type=int, help="Number of repetition")
 
-    launch_tests("scp4[3-5]", 3)
+    launch_tests("scp4[2-3]", 3)
