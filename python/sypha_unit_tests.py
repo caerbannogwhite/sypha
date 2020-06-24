@@ -1,6 +1,9 @@
+#! /usr/bin/python3
+
 import re
 import os
 
+from datetime import datetime
 from statistics import mean, stdev
 from argparse import ArgumentParser
 
@@ -76,8 +79,7 @@ SCPNRH_SOLUTIONS = [
 
 def exec_sypha(inst, solution, repeat):
     data = dict()
-    log_file_name = f"{inst}_test.log"
-
+    
     pass_cnt = 0
     fail_cnt = 0
     iterations = []
@@ -86,7 +88,8 @@ def exec_sypha(inst, solution, repeat):
     solver_times = []
     total_times = []
 
-    for _ in range(repeat):
+    for i in range(repeat):
+        log_file_name = f"{inst}_test_{i}_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
         os.system(f"{BASE_DIR}/sypha --model SCP --verbosity 1 "
                   f"--input-file {BASE_DIR}/data/{inst}.txt > {log_file_name}")
     
@@ -142,7 +145,7 @@ def exec_sypha(inst, solution, repeat):
 
 
 def launch_tests(match, repeat):
-    log_file = open("test.log", "w")
+    log_file = open(f"result_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", "w")
 
     # header
     log_file.write(",".join([
@@ -191,8 +194,9 @@ def launch_tests(match, repeat):
 
 
 if __name__ == "__main__":
-    # parser = ArgumentParser("Sypha unit tests.")
-    # parser.add_argument("--test-match", type=str, help="")
-    # parser.add_argument("--repeat", type=int, help="Number of repetition")
+    parser = ArgumentParser("Sypha unit tests.")
+    parser.add_argument("--test-match", dest="match", type=str, help="")
+    parser.add_argument("--repeat", dest="repeat", type=int, help="Number of repetition")
 
-    launch_tests("scp[4-5]*", 3)
+    args = parser.parse_args()
+    launch_tests(args.match, args.repeat)
