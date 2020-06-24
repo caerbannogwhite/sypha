@@ -304,10 +304,10 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
         // x, s multiplication and res XS update: to improve
         for (j = 0; j < node.ncols; ++j)
         {
-            checkCudaErrors(cudaMemcpy(&alpha, &d_x[j], sizeof(double), cudaMemcpyDeviceToHost));
-            checkCudaErrors(cudaMemcpy(&beta, &d_s[j], sizeof(double), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_x[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
+            checkCudaErrors(cudaMemcpyAsync(&beta, &d_s[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
             alpha = - (alpha * beta);
-            checkCudaErrors(cudaMemcpy(&d_resXS[j], &alpha, sizeof(double), cudaMemcpyHostToDevice));
+            checkCudaErrors(cudaMemcpyAsync(&d_resXS[j], &alpha, sizeof(double), cudaMemcpyHostToDevice, node.cudaStream));
         }
 
         checkCudaErrors(cusolverSpDcsrlsvqr(node.cusolverSpHandle,
@@ -327,7 +327,7 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
                                            d_csrAVals, d_csrAOffs, d_csrAInds,
                                            d_ADn, A_nrows));
 
-        // utils_printDmat(A_nrows, A_ncols, A_nrows, d_ADn, true, true);
+        utils_printDmat(A_nrows, A_ncols, A_nrows, d_ADn, true, true);
         checkCudaErrors(cudaFree(d_ADn));
 
         printf("sol:\n");
@@ -345,16 +345,16 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
         alphaMaxDual = DBL_MAX;
         for (j = 0; j < node.ncols; ++j)
         {
-            checkCudaErrors(cudaMemcpy(&alpha, &d_x[j], sizeof(double), cudaMemcpyDeviceToHost));
-            checkCudaErrors(cudaMemcpy(&beta, &d_deltaX[j], sizeof(double), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_x[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
+            checkCudaErrors(cudaMemcpyAsync(&beta, &d_deltaX[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
             if (beta < 0.0)
             {
                 alpha = -(alpha / beta);
                 alphaMaxPrim = alphaMaxPrim < alpha ? alphaMaxPrim : alpha;
             }
 
-            checkCudaErrors(cudaMemcpy(&alpha, &d_s[j], sizeof(double), cudaMemcpyDeviceToHost));
-            checkCudaErrors(cudaMemcpy(&beta, &d_deltaS[j], sizeof(double), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_s[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
+            checkCudaErrors(cudaMemcpyAsync(&beta, &d_deltaS[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
             if (beta < 0.0)
             {
                 alpha = -(alpha / beta);
@@ -371,8 +371,8 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
         // the dimension of the buffer is guaranteed to be >= 2 * ncols
         d_bufferX = d_buffer;
         d_bufferS = &d_buffer[node.ncols];
-        checkCudaErrors(cudaMemcpy(d_bufferX, d_x, sizeof(double) * node.ncols, cudaMemcpyDeviceToDevice));
-        checkCudaErrors(cudaMemcpy(d_bufferS, d_s, sizeof(double) * node.ncols, cudaMemcpyDeviceToDevice));
+        checkCudaErrors(cudaMemcpyAsync(d_bufferX, d_x, sizeof(double) * node.ncols, cudaMemcpyDeviceToDevice, node.cudaStream));
+        checkCudaErrors(cudaMemcpyAsync(d_bufferS, d_s, sizeof(double) * node.ncols, cudaMemcpyDeviceToDevice, node.cudaStream));
 
         checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
                                     &alphaPrim, d_deltaX, 1, d_bufferX, 1));
@@ -398,10 +398,10 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
         // x, s multiplication and res XS update: to improve
         for (j = 0; j < node.ncols; ++j)
         {
-            checkCudaErrors(cudaMemcpy(&alpha, &d_deltaX[j], sizeof(double), cudaMemcpyDeviceToHost));
-            checkCudaErrors(cudaMemcpy(&beta, &d_deltaS[j], sizeof(double), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_deltaX[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
+            checkCudaErrors(cudaMemcpyAsync(&beta, &d_deltaS[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
             alpha = -(alpha * beta) + sigma * mu;
-            checkCudaErrors(cudaMemcpy(&d_bufferX[j], &alpha, sizeof(double), cudaMemcpyHostToDevice));
+            checkCudaErrors(cudaMemcpyAsync(&d_bufferX[j], &alpha, sizeof(double), cudaMemcpyHostToDevice, node.cudaStream));
         }
 
         alpha = 1.0;
@@ -429,16 +429,16 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
         alphaMaxDual = DBL_MAX;
         for (j = 0; j < node.ncols; ++j)
         {
-            checkCudaErrors(cudaMemcpy(&alpha, &d_x[j], sizeof(double), cudaMemcpyDeviceToHost));
-            checkCudaErrors(cudaMemcpy(&beta, &d_deltaX[j], sizeof(double), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_x[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
+            checkCudaErrors(cudaMemcpyAsync(&beta, &d_deltaX[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
             if (beta < 0.0)
             {
                 alpha = -(alpha / beta);
                 alphaMaxPrim = alphaMaxPrim < alpha ? alphaMaxPrim : alpha;
             }
 
-            checkCudaErrors(cudaMemcpy(&alpha, &d_s[j], sizeof(double), cudaMemcpyDeviceToHost));
-            checkCudaErrors(cudaMemcpy(&beta, &d_deltaS[j], sizeof(double), cudaMemcpyDeviceToHost));
+            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_s[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
+            checkCudaErrors(cudaMemcpyAsync(&beta, &d_deltaS[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
             if (beta < 0.0)
             {
                 alpha = -(alpha / beta);
@@ -482,11 +482,8 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
 
         // update x and s on matrix
         off = node.nnz * 2 + node.ncols;
-        for (j = 0; j < node.ncols; ++j)
-        {
-            checkCudaErrors(cudaMemcpy(&d_csrAVals[off++], &d_s[j], sizeof(double), cudaMemcpyDeviceToDevice));
-            checkCudaErrors(cudaMemcpy(&d_csrAVals[off++], &d_x[j], sizeof(double), cudaMemcpyDeviceToDevice));
-        }
+        checkCudaErrors(cublasDcopy(node.cublasHandle, node.ncols, d_s, 1, &d_csrAVals[off], 2));
+        checkCudaErrors(cublasDcopy(node.cublasHandle, node.ncols, d_x, 1, &d_csrAVals[off + 1], 2));
 
         ++iterations;
 

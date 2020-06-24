@@ -43,16 +43,16 @@ def launch(path, instance, sparse=False):
     return flag
 
 
-# path = Path(f"/home/macs/coding/optimization/sypha/data/demo00.txt")
-# launch(path, "demo00", sparse=False)
+path = Path(f"/home/macs/coding/optimization/sypha/data/demo00.txt")
+launch(path, "demo00", sparse=False)
 # 
 # #path = Path("C:\\Users\\IP 520S-14IKB 96IX\\coding\\sypha\\data\\ex_balas1.txt")
 # path = Path(f"/home/macs/coding/optimization/sypha/data/ex_balas1.txt")
 # launch(path, "ex_balas1", sparse=False)
 
-i = 0
-path = Path(f"/home/macs/coding/optimization/sypha/data/scp_demo{i:02d}.txt")
-launch(path, f"scp_demo{i:02d}", sparse=False)
+# i = 0
+# path = Path(f"/home/macs/coding/optimization/sypha/data/scp_demo{i:02d}.txt")
+# launch(path, f"scp_demo{i:02d}", sparse=False)
 exit()
 
 # counter = 0
