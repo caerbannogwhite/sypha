@@ -61,6 +61,7 @@ public:
     friend SyphaStatus solver_dense_mehrotra(SyphaNodeDense &node);
     friend SyphaStatus solver_dense_mehrotra_init(SyphaNodeDense &node);
     friend SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_1(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node);

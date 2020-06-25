@@ -97,6 +97,7 @@ public:
     friend SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string inputFilePath);
     friend SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string inputFilePath);
     friend SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_1(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node);

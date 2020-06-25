@@ -15,9 +15,11 @@
 
 #include "sypha_cuda_helper.h"
 #include <cuda_runtime.h>
+#include <cuda_runtime_api.h>
+#include <cusparse.h>
 
 #include "cusparse.h"
-#include "cusolverSp.h"
+#include <cusolverSp.h>
 
 using namespace std;
 namespace po = boost::program_options;
