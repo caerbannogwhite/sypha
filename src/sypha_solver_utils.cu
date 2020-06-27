@@ -51,8 +51,17 @@ double cpuSecond()
 }
 
 __global__ void array_mult_dev(double *A, double *B, double *C) {
-	int i = threadIdx.x;
-	C[i] = A[i] * B[i];
+	//int i = threadIdx.x;
+	//for (int j = 0; j < 32; ++j)
+	//{
+	//	C[i*32+j] = A[i*32+j] * B[i*32+j];
+	//}
+
+	int off = threadIdx.x*256;
+	C[off] = A[off] * B[off];
+	C[off+1] = A[off+1] * B[off+1];
+	C[off+2] = A[off+2] * B[off+2];
+	C[off+3] = A[off+3] * B[off+3];
 }
 
 void array_mult_host(double *A, double *B, double *C, const int N) {
@@ -61,7 +70,7 @@ void array_mult_host(double *A, double *B, double *C, const int N) {
 	}
 }
 
-void array_mult_host_test(double *d_A, double *d_B, double *d_C, const int N) {
+void array_mult_host_test_1(double *d_A, double *d_B, double *d_C, const int N) {
 	double alpha, beta;
 	for (int j = 0; j < N; ++j)
     {
@@ -71,6 +80,34 @@ void array_mult_host_test(double *d_A, double *d_B, double *d_C, const int N) {
         cudaMemcpy(&d_C[j], &alpha, sizeof(double), cudaMemcpyHostToDevice);
     }
 }
+
+void array_mult_host_test_2(double *d_A, double *d_B, double *d_C, const int N) {
+	double *buffA;
+	double *buffB;
+	double *buffC;
+	
+	buffA = (double*)malloc(sizeof(double) * N);
+	buffB = (double*)malloc(sizeof(double) * N);
+	buffC = (double*)malloc(sizeof(double) * N);
+	
+	cudaMemcpy(buffA, d_A, sizeof(double) * N, cudaMemcpyDeviceToHost);
+	cudaMemcpy(buffB, d_B, sizeof(double) * N, cudaMemcpyDeviceToHost);
+	cudaMemcpy(buffC, d_C, sizeof(double) * N, cudaMemcpyDeviceToHost);
+
+	for (int j = 0; j < N; ++j)
+    {
+		buffC[j] = buffA[j] * buffB[j];
+	}
+
+	cudaMemcpy(d_A, buffA, sizeof(double) * N, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_B, buffB, sizeof(double) * N, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_C, buffC, sizeof(double) * N, cudaMemcpyHostToDevice);
+
+	free(buffA);
+	free(buffB);
+	free(buffC);
+}
+
 
 void initialData(double *ip,int size) {
 	// generate different seed for random number
@@ -100,7 +137,7 @@ bool checkResult(double *h_res, double *d_res, int n)
 
 int main(int argc, char **argv) {
 	int repeat = 20;
-	int nElem = 32*32;
+	int nElem = 32*32 * 2;
 	size_t nBytes = nElem * sizeof(double);
 	
 	double tStart, tEnd, sum;
@@ -128,32 +165,43 @@ int main(int argc, char **argv) {
 		tEnd = cpuSecond();
 		sum += (tEnd - tStart) * 1000;
 	}
-	std::cout << "array_mult_host time " << (sum / repeat) << " ms" << std::endl;
+	printf("%30s - %10.7lf ms\n", "array_mult_host", (sum / repeat));
 
 	cudaMemcpy(d_A, h_A, nBytes, cudaMemcpyHostToDevice);
 	cudaMemcpy(d_B, h_B, nBytes, cudaMemcpyHostToDevice);
-	
-	// sum = 0;
-	// for (int i = 0; i < repeat; ++i)
-	// {
-	// 	tStart = cpuSecond();
-	// 	array_mult_host_test(h_A, h_B, h_C, nElem);
-	// 	tEnd = cpuSecond();
-	// 	sum += (tEnd - tStart) * 1000;
-	// }
-	// std::cout << "array_mult_host_test time " << (sum / repeat) << " ms" << std::endl; 
 	
 	sum = 0;
 	for (int i = 0; i < repeat; ++i)
 	{
 		tStart = cpuSecond();
-		array_mult_dev<<<1, 32>>>(d_A, d_B, d_C);
+		array_mult_host_test_1(h_A, h_B, h_C, nElem);
+		tEnd = cpuSecond();
+		sum += (tEnd - tStart) * 1000;
+	}
+	printf("%30s - %10.7lf ms\n", "array_mult_host_test_1", (sum / repeat));
+
+	sum = 0;
+	for (int i = 0; i < repeat; ++i)
+	{
+		tStart = cpuSecond();
+		array_mult_host_test_2(h_A, h_B, h_C, nElem);
+		tEnd = cpuSecond();
+		sum += (tEnd - tStart) * 1000;
+	}
+	printf("%30s - %10.7lf ms\n", "array_mult_host_test_2", (sum / repeat));
+	
+	sum = 0;
+	for (int i = 0; i < repeat; ++i)
+	{
+		tStart = cpuSecond();
+		array_mult_dev<<<1, 256>>>(d_A, d_B, d_C);
 		cudaDeviceSynchronize();
 		tEnd = cpuSecond();
 		sum += (tEnd - tStart) * 1000;
 	}
-	std::cout << "array_mult_dev time " << (sum / repeat) << " ms" << std::endl; 
-	
+	printf("%30s - %10.7lf ms\n", "array_mult_dev", (sum / repeat));
+
+	printf("\n");
 
 	checkResult(h_C, d_C, nElem);
 

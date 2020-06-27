@@ -1,8 +1,8 @@
-################################################################################
+###############################################################
 #
-# Makefile project only supported on Mac OS X and Linux Platforms)
+# Makefile project only supported on Linux Platforms)
 #
-################################################################################
+###############################################################
 
 # Location of the CUDA Toolkit
 CUDA_PATH ?= /usr/local/cuda
@@ -76,49 +76,7 @@ ifeq (,$(filter $(TARGET_OS),linux darwin qnx android))
     $(error ERROR - unsupported value $(TARGET_OS) for TARGET_OS!)
 endif
 
-# host compiler
-ifeq ($(TARGET_OS),darwin)
-    ifeq ($(shell expr `xcodebuild -version | grep -i xcode | awk '{print $$2}' | cut -d'.' -f1` \>= 5),1)
-        HOST_COMPILER ?= clang++
-    endif
-else ifneq ($(TARGET_ARCH),$(HOST_ARCH))
-    ifeq ($(HOST_ARCH)-$(TARGET_ARCH),x86_64-armv7l)
-        ifeq ($(TARGET_OS),linux)
-            HOST_COMPILER ?= arm-linux-gnueabihf-g++
-        else ifeq ($(TARGET_OS),qnx)
-            ifeq ($(QNX_HOST),)
-                $(error ERROR - QNX_HOST must be passed to the QNX host toolchain)
-            endif
-            ifeq ($(QNX_TARGET),)
-                $(error ERROR - QNX_TARGET must be passed to the QNX target toolchain)
-            endif
-            export QNX_HOST
-            export QNX_TARGET
-            HOST_COMPILER ?= $(QNX_HOST)/usr/bin/arm-unknown-nto-qnx6.6.0eabi-g++
-        else ifeq ($(TARGET_OS),android)
-            HOST_COMPILER ?= arm-linux-androideabi-g++
-        endif
-    else ifeq ($(TARGET_ARCH),aarch64)
-        ifeq ($(TARGET_OS), linux)
-            HOST_COMPILER ?= aarch64-linux-gnu-g++
-        else ifeq ($(TARGET_OS),qnx)
-            ifeq ($(QNX_HOST),)
-                $(error ERROR - QNX_HOST must be passed to the QNX host toolchain)
-            endif
-            ifeq ($(QNX_TARGET),)
-                $(error ERROR - QNX_TARGET must be passed to the QNX target toolchain)
-            endif
-            export QNX_HOST
-            export QNX_TARGET
-            HOST_COMPILER ?= $(QNX_HOST)/usr/bin/aarch64-unknown-nto-qnx7.0.0-g++
-        else ifeq ($(TARGET_OS), android)
-            HOST_COMPILER ?= aarch64-linux-android-clang++
-        endif
-    else ifeq ($(TARGET_ARCH),ppc64le)
-        HOST_COMPILER ?= powerpc64le-linux-gnu-g++
-    endif
-endif
-HOST_COMPILER ?= g++
+HOST_COMPILER = g++
 NVCC          := $(CUDA_PATH)/bin/nvcc -ccbin $(HOST_COMPILER)
 
 # internal flags
@@ -191,13 +149,7 @@ else ifeq ($(TARGET_ARCH),ppc64le)
     CUDA_INSTALL_TARGET_DIR = targets/ppc64le-linux/
 endif
 
-# Debug build flags
-ifeq ($(dbg),1)
-      NVCCFLAGS += -g -G -O2
-      BUILD_TYPE := debug
-else
-      BUILD_TYPE := release
-endif
+NVCCFLAGS += -g -G -O3 -use_fast_math
 
 ALL_CCFLAGS :=
 ALL_CCFLAGS += $(NVCCFLAGS)
@@ -269,20 +221,6 @@ else
 	@echo "Sample is ready - all dependencies have been met"
 endif
 
-#cuSolverDn_LinearSolver.o:cuSolverDn_LinearSolver.cpp
-#	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
-#
-#mmio.c.o:mmio.c
-#	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
-#
-#mmio_wrapper.o:mmio_wrapper.cpp
-#	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
-#
-#cuSolverDn_LinearSolver: cuSolverDn_LinearSolver.o mmio.c.o mmio_wrapper.o
-#	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(LIBRARIES)
-#	$(EXEC) mkdir -p ../../bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
-#	$(EXEC) cp $@ ../../bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
-
 sypha : common main model_reader sypha_environment sypha_node_dense sypha_node_sparse sypha_solver_dense sypha_solver_sparse sypha_test
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) bin/common.o bin/main.o bin/model_reader.o bin/sypha_environment.o bin/sypha_node_dense.o bin/sypha_node_sparse.o bin/sypha_solver_dense.o bin/sypha_solver_sparse.o bin/sypha_test.o -o $@ $(LIBRARIES)
 
@@ -321,11 +259,6 @@ sypha_solver_sparse : src/sypha_solver_sparse.cpp
 sypha_test : src/sypha_test.cpp
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
 	@mv $@.o bin
-
-
-# cusolver_test : src/cusolver_test.cpp
-# 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $+ $(LIBRARIES)
-# 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) $@.o -o $@ $+ $(LIBRARIES)
 
 
 run: build
