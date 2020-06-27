@@ -292,14 +292,9 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
 
 
         // x, s multiplication and res XS update: to improve
-        for (j = 0; j < node.ncols; ++j)
-        {
-            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_x[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            checkCudaErrors(cudaMemcpyAsync(&beta, &d_s[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            alpha = - (alpha * beta);
-            checkCudaErrors(cudaMemcpyAsync(&d_resXS[j], &alpha, sizeof(double), cudaMemcpyHostToDevice, node.cudaStream));
-        }
-
+        //elem_min_mult_hybr(d_x, d_s, d_resXS, node.ncols);
+        elem_min_mult_host(d_x, d_s, d_resXS, node.ncols);
+        
         checkCudaErrors(cusolverSpDcsrlsvqr(node.cusolverSpHandle,
                                             A_nrows, A_nnz, A_descr,
                                             d_csrAVals, d_csrAOffs, d_csrAInds,

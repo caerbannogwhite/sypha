@@ -3,6 +3,7 @@
 
 #include "common.h"
 #include "sypha_node_sparse.h"
+#include "sypha_solver_utils.h"
 #include "gsl/gsl_matrix.h"
 #include "gsl/gsl_linalg.h"
 

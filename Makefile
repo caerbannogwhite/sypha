@@ -221,8 +221,8 @@ else
 	@echo "Sample is ready - all dependencies have been met"
 endif
 
-sypha : common main model_reader sypha_environment sypha_node_dense sypha_node_sparse sypha_solver_dense sypha_solver_sparse sypha_test
-	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) bin/common.o bin/main.o bin/model_reader.o bin/sypha_environment.o bin/sypha_node_dense.o bin/sypha_node_sparse.o bin/sypha_solver_dense.o bin/sypha_solver_sparse.o bin/sypha_test.o -o $@ $(LIBRARIES)
+sypha : common main model_reader sypha_environment sypha_node_dense sypha_node_sparse sypha_solver_dense sypha_solver_sparse sypha_solver_utils sypha_test
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) bin/common.o bin/main.o bin/model_reader.o bin/sypha_environment.o bin/sypha_node_dense.o bin/sypha_node_sparse.o bin/sypha_solver_dense.o bin/sypha_solver_sparse.o bin/sypha_solver_utils.o bin/sypha_test.o -o $@ $(LIBRARIES)
 
 common : src/common.cpp
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
@@ -254,6 +254,10 @@ sypha_solver_dense : src/sypha_solver_dense.cpp
 
 sypha_solver_sparse : src/sypha_solver_sparse.cpp
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
+	@mv $@.o bin
+
+sypha_solver_utils : src/sypha_solver_utils.cu
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cu $(LIBRARIES)
 	@mv $@.o bin
 
 sypha_test : src/sypha_test.cpp

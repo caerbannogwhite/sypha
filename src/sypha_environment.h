@@ -35,8 +35,8 @@ private:
 
     // Merhrotra parameters
     int MEHROTRA_MAX_ITER = 1000;
-    double MEHROTRA_ETA = 0.9;
-    double MEHROTRA_MU_TOL = 1.E-8;
+    double MEHROTRA_ETA = 0.95;
+    double MEHROTRA_MU_TOL = 1.E-4;
     double MEHROTRA_CHOL_TOL = 1.E-8;
 
 public:

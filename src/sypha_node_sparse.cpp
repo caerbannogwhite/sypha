@@ -147,7 +147,7 @@ double SyphaNodeSparse::getTimeSolver()
 
 SyphaStatus SyphaNodeSparse::solve()
 {
-    return solver_sparse_mehrotra_2(*this);
+    return solver_sparse_mehrotra(*this);
 }
 
 SyphaStatus SyphaNodeSparse::readModel()
