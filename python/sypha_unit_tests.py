@@ -8,7 +8,8 @@ from statistics import mean, stdev
 from argparse import ArgumentParser
 
 ACCEPT_TOL = 1.E-4
-BASE_DIR = "/home/macs/coding/optimization/sypha"
+#BASE_DIR = "/home/macs/coding/optimization/sypha"
+BASE_DIR = "/home/ubuntu/sypha"
 
 SCP4_STRINGS = [f"scp4{i+1:d}" for i in range(10)]
 SCP5_STRINGS = [f"scp5{i+1:d}" for i in range(10)]
