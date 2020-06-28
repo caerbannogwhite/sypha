@@ -650,8 +650,8 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
 
     // Residuals
     // resB, resC equation 14.7, page 395(414)Numerical Optimization
-    // resC = -mat' * y + (obj - s)
-    // resB = -mat  * x + rhs
+    // resC = AT * Y - (obj - s)
+    // resB = A  * X - rhs
 
     checkCudaErrors(cusparseCreateDnVec(&vecX, (int64_t)node.ncols, d_x, CUDA_R_64F));
     checkCudaErrors(cusparseCreateDnVec(&vecY, (int64_t)node.nrows, d_y, CUDA_R_64F));
@@ -668,8 +668,8 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
     checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
                                 &alpha, d_s, 1, d_resC, 1));
 
-    alpha = -1.0;
-    beta = 1.0;
+    alpha = 1.0;
+    beta = -1.0;
     checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                                             &alpha, AT_descr, vecY,
                                             &beta, vecResC, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
@@ -686,8 +686,8 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
                                  &beta, vecResC, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
                                  d_buffer1));
 
-    alpha = -1.0;
-    beta = 1.0;
+    alpha = 1.0;
+    beta = -1.0;
     checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                                             &alpha, node.matDescr, vecX,
                                             &beta, vecResB, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
@@ -726,21 +726,31 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
     
     node.env->logger("Starting Mehrotra proceduce", "INFO", 17);
     node.timeSolverStart = node.env->timer();
-
-    printf("MU = %lf\n", mu);
     
     iterations = 0;
     while ((iterations < node.env->MEHROTRA_MAX_ITER) && (mu > node.env->MEHROTRA_MU_TOL))
     {
         // x, s multiplication and res XS update: to improve
-        //elem_min_mult_hybr(d_x, d_s, d_resXS, node.ncols);
         cudaDeviceSynchronize();
-        elem_min_mult_kernel<<<bSize, 32>>>(d_x, d_s, d_resXS, node.ncols);
+        elem_mult_kernel<<<bSize, 32>>>(d_x, d_s, d_resXS, node.ncols);
 
         elem_inv_kernel<<<bSize, 32>>>(d_s, d_invS, node.ncols);
 
         cudaDeviceSynchronize();
         elem_mult_kernel<<<bSize, 32>>>(d_x, d_invS, d_Dvals, node.ncols);
+
+        // cudaDeviceSynchronize();
+        // printf("%d) START\n", iterations);
+        // printf("X\n");
+        // utils_printDvec(node.ncols, d_x, true);
+        // printf("INV(S)\n");
+        // utils_printDvec(node.ncols, d_invS, true);
+        // printf("D\n");
+        // utils_printDvec(node.ncols, d_Dvals, true);
+        // printf("RES B\n");
+        // utils_printDvec(node.nrows, d_resB, true);
+        // printf("RES C\n");
+        // utils_printDvec(node.ncols, d_resC, true);
 
         ///////////////             COMPUTE AD
         {
@@ -920,6 +930,7 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
         //                                    d_ADAvals, d_ADAoffs, d_ADAinds,
         //                                    d_ADn, ADA_nrows));
 
+        // printf("%d) MAT\n", iterations);
         // utils_printDmat(ADA_nrows, ADA_ncols, ADA_nrows, d_ADn, true, false);
         // checkCudaErrors(cudaFree(d_ADn));
 
@@ -931,11 +942,10 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
         // utils_printDvec(A_nnz, d_csrAVals, true);
         ///////////////////             END TEST
 
-        ///////////////             COMPUTE TMPA = (-resB) - AD * resC
+        ///////////////             COMPUTE TMPA = - AD * resC - resB
 
         // store TMPA vector on buffer 1, size of buffer 1 is guaranteed to 
         // be >= 2*ncols, copy resB on TMPA
-        // resB is already negative signed
         d_tmpA = d_buffer1;
         d_tmpB = &d_buffer1[node.ncols];
         checkCudaErrors(cusparseCreateDnVec(&vecTmpA, AD_nrows, d_tmpA, CUDA_R_64F));
@@ -947,7 +957,7 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
 
         {    
             alpha = -1.0;
-            beta = 1.0;
+            beta = -1.0;
 
             // buffer 1 used for TMPA and TMPB
             checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle,
@@ -1002,12 +1012,12 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
                                             d_delY, &singularity));
         }
 
-        ///////////////             COMPUTE DEL_S = (-resC) - AT * DEL_Y
+        ///////////////             COMPUTE DEL_S = - AT * DEL_Y - resC
         checkCudaErrors(cudaMemcpyAsync(d_delS, d_resC, sizeof(double) * AT_nrows, cudaMemcpyDeviceToDevice, node.cudaStream));
 
         {
             alpha = -1.0;
-            beta = 1.0;
+            beta = -1.0;
 
             // buffer 1 used for TMPA and TMPB
             checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle,
@@ -1052,14 +1062,13 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
                         d_buffer2));   
         }
 
-        printf("delta X\n");
-        utils_printDvec(node.ncols, d_delX, true);
-        printf("delta Y\n");
-        utils_printDvec(node.nrows, d_delY, true);
-        printf("delta S\n");
-        utils_printDvec(node.ncols, d_delS, true);
-
-        break;
+        // printf("%d) AFFINE SYSTEM\n", iterations);
+        // printf("delta X\n");
+        // utils_printDvec(node.ncols, d_delX, true);
+        // printf("delta Y\n");
+        // utils_printDvec(node.nrows, d_delY, true);
+        // printf("delta S\n");
+        // utils_printDvec(node.ncols, d_delS, true);
 
         // affine step length, definition 14.32 at page 408(427)
         // alpha_max_p = min([-xi / delta_xi for xi, delta_xi in zip(x, delta_x_aff) if delta_xi < 0.0])
@@ -1071,6 +1080,192 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
 
         alphaPrim = gsl_min(1.0, alphaMaxPrim);
         alphaDual = gsl_min(1.0, alphaMaxDual);
+
+        // mu_aff = (x + alpha_aff_p * delta_x_aff).dot(s + alpha_aff_d * delta_s_aff) / float(n)
+        // d_deltaX, d_deltaY, d_deltaS are pointees to d_sol
+        // the solution of the previous system
+        // the dimension of the buffer is guaranteed to be >= 2 * ncols
+        //d_tmpA = d_buffer1;
+        //d_tmpB = &d_buffer1[node.ncols];
+        checkCudaErrors(cudaMemcpyAsync(d_tmpA, d_x, sizeof(double) * node.ncols, cudaMemcpyDeviceToDevice, node.cudaStream));
+        checkCudaErrors(cudaMemcpyAsync(d_tmpB, d_s, sizeof(double) * node.ncols, cudaMemcpyDeviceToDevice, node.cudaStream));
+
+        checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols, &alphaPrim, d_delX, 1, d_tmpA, 1));
+        checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols, &alphaDual, d_delS, 1, d_tmpB, 1));
+
+        checkCudaErrors(cublasDdot(node.cublasHandle, node.ncols, d_tmpA, 1, d_tmpB, 1, &muAff));
+        muAff /= node.ncols;
+
+        // corrector step or centering parameter
+        sigma = gsl_pow_3(muAff / mu);
+
+        elem_mult_kernel<<<bSize, 32>>>(d_delX, d_delS, d_tmpA, node.ncols);
+        cudaDeviceSynchronize();
+
+        alpha = 1.0;
+        checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols, &alpha, d_tmpA, 1, d_resXS, 1));
+
+        alpha = - sigma * mu;
+        scal_sum_kernel<<<bSize, 32>>>(alpha, d_resXS, node.ncols);
+        cudaDeviceSynchronize();
+
+        ///////////////             COMPUTE TMPA = - AD * resC - resB
+
+        // store TMPA vector on buffer 1, size of buffer 1 is guaranteed to 
+        // be >= 2*ncols, copy resB on TMPA
+        checkCudaErrors(cusparseCreateDnVec(&vecTmpA, AD_nrows, d_tmpA, CUDA_R_64F));
+        checkCudaErrors(cudaMemcpyAsync(d_tmpA, d_resB, sizeof(double) * AD_nrows, cudaMemcpyDeviceToDevice, node.cudaStream));
+
+        // compute TMPB
+        elem_mult_kernel<<<bSize, 32>>>(d_resXS, d_invS, d_tmpB, node.ncols);
+        checkCudaErrors(cusparseCreateDnVec(&vecTmpB, AD_ncols, d_tmpB, CUDA_R_64F));
+
+        {    
+            alpha = -1.0;
+            beta = -1.0;
+
+            // buffer 1 used for TMPA and TMPB
+            checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, AD_descr, vecResC,
+                        &beta, vecTmpA, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        &bufferSize2));
+
+            if (bufferSize2 > currBufferSize2)
+            {
+                currBufferSize2 = bufferSize2;
+                checkCudaErrors(cudaMalloc((void **)&d_buffer2, currBufferSize2));
+            }
+
+            checkCudaErrors(cusparseSpMV(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, AD_descr, vecResC,
+                        &beta, vecTmpA, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        d_buffer2));
+        }
+
+        ///////////////             COMPUTE TMPA = TMPA + A * TMPB
+        {    
+            alpha = 1.0;
+            beta = 1.0;
+
+            cudaDeviceSynchronize();
+
+            // buffer 1 used for TMPA and TMPB
+            checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, node.matDescr, vecTmpB,
+                        &beta, vecTmpA, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        &bufferSize2));
+
+            if (bufferSize2 > currBufferSize2)
+            {
+                currBufferSize2 = bufferSize2;
+                checkCudaErrors(cudaMalloc((void **)&d_buffer2, currBufferSize2));
+            }
+
+            checkCudaErrors(cusparseSpMV(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, node.matDescr, vecTmpB,
+                        &beta, vecTmpA, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        d_buffer2));
+        }
+
+        ///////////////             COMPUTE DEL_Y = SOLVE(ADA, TMPA)
+        {
+            checkCudaErrors(cusolverSpDcsrlsvqr(node.cusolverSpHandle,
+                                            ADA_nrows, ADA_nnz, matDescrGen,
+                                            d_ADAvals, d_ADAoffs, d_ADAinds,
+                                            d_tmpA,
+                                            node.env->MEHROTRA_CHOL_TOL, reorder,
+                                            d_delY, &singularity));
+        }
+
+        ///////////////             COMPUTE DEL_S = - AT * DEL_Y - resC
+        checkCudaErrors(cudaMemcpyAsync(d_delS, d_resC, sizeof(double) * AT_nrows, cudaMemcpyDeviceToDevice, node.cudaStream));
+
+        {
+            alpha = -1.0;
+            beta = -1.0;
+
+            // buffer 1 used for TMPA and TMPB
+            checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, AT_descr, vecDelY,
+                        &beta, vecDelS, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        &bufferSize2));
+
+            if (bufferSize2 > currBufferSize2)
+            {
+                currBufferSize2 = bufferSize2;
+                checkCudaErrors(cudaMalloc((void **)&d_buffer2, currBufferSize2));
+            }
+
+            checkCudaErrors(cusparseSpMV(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, AT_descr, vecDelY,
+                        &beta, vecDelS, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        d_buffer2));   
+        }
+
+        ///////////////             COMPUTE DEL_X = -TMP_B - D * DEL_S
+        checkCudaErrors(cudaMemcpyAsync(d_delX, d_tmpB, sizeof(double) * D_nrows, cudaMemcpyDeviceToDevice, node.cudaStream));
+
+        {
+            alpha = -1.0;
+            beta = -1.0;
+
+            // buffer 1 used for TMPA and TMPB
+            checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, D_descr, vecDelS,
+                        &beta, vecDelX, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        &bufferSize2));
+
+            if (bufferSize2 > currBufferSize2)
+            {
+                currBufferSize2 = bufferSize2;
+                checkCudaErrors(cudaMalloc((void **)&d_buffer2, currBufferSize2));
+            }
+
+            checkCudaErrors(cusparseSpMV(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, D_descr, vecDelS,
+                        &beta, vecDelX, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        d_buffer2));   
+        }
+
+        // printf("%d) CORRECTION SYSTEM\n", iterations);
+        // printf("delta X\n");
+        // utils_printDvec(node.ncols, d_delX, true);
+        // printf("delta Y\n");
+        // utils_printDvec(node.nrows, d_delY, true);
+        // printf("delta S\n");
+        // utils_printDvec(node.ncols, d_delS, true);
+
+        // finding alphaMaxPrim and alphaMaxDual: to improve
+        find_alpha_max(&alphaMaxPrim, &alphaMaxDual,
+                       d_x, d_delX, d_s, d_delS, node.ncols);
+
+        alphaPrim = gsl_min(1.0, node.env->MEHROTRA_ETA * alphaMaxPrim);
+        alphaDual = gsl_min(1.0, node.env->MEHROTRA_ETA * alphaMaxDual);
+
+        // d_deltaX, d_deltaY, d_deltaS are pointees to d_sol
+        // the solution of the previous system 
+
+        checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
+                                    &alphaPrim, d_delX, 1, d_x, 1));
+
+        checkCudaErrors(cublasDaxpy(node.cublasHandle, node.nrows,
+                                    &alphaDual, d_delY, 1, d_y, 1));
+        
+        checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
+                                    &alphaDual, d_delS, 1, d_s, 1));
+
+        ///////////////             UPDATE
+
+        alpha = -(alphaDual - 1.0);
+        checkCudaErrors(cublasDscal(node.cublasHandle, node.ncols,
+                                    &alpha, d_resC, 1));
+
+        alpha = -(alphaPrim - 1.0);
+        checkCudaErrors(cublasDscal(node.cublasHandle, node.nrows,
+                                    &alpha, d_resB, 1));
+
+        checkCudaErrors(cublasDdot(node.cublasHandle, node.ncols, d_x, 1, d_s, 1, &mu));
+        mu /= node.ncols;
 
         ++iterations;
     }

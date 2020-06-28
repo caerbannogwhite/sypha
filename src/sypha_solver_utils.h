@@ -5,6 +5,7 @@
 
 __global__ void range_kernel(int *d_A, const int N);
 __global__ void range_kernel(double *d_A, const int N);
+__global__ void scal_sum_kernel(double alpha, double *d_A, const int N);
 __global__ void elem_mult_kernel(double *d_A, double *d_B, double *d_C, const int N);
 __global__ void elem_min_mult_kernel(double *d_A, double *d_B, double *d_C, const int N);
 __global__ void elem_inv_kernel(double *d_A, double *d_invA, const int N);

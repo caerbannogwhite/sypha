@@ -29,6 +29,13 @@ __global__ void range_kernel(double *d_A, const int N)
 		d_A[idx] = idx;
 }
 
+__global__ void scal_sum_kernel(double alpha, double *d_A, const int N)
+{
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < N)
+		d_A[idx] += alpha;
+}
+
 __global__ void elem_mult_kernel(double *d_A, double *d_B, double *d_C, const int N)
 {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
