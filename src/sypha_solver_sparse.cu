@@ -509,13 +509,20 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
     double *d_bufferS = NULL;
 
     double *d_resC = NULL, *d_resB = NULL, *d_resXS = NULL;
+    double *d_tmpA = NULL, *d_tmpB = NULL;
     double *d_x = NULL, *d_y = NULL, *d_s = NULL, *d_invS = NULL;
     double *d_delX = NULL, *d_delY = NULL, *d_delS = NULL;
 
     char message[1024];
 
-    cusparseDnVecDescr_t vecX, vecY, vecResC, vecResB;
+    cusparseDnVecDescr_t vecX, vecY, vecS, vecResC, vecResB;
+    cusparseDnVecDescr_t vecDelX, vecDelY, vecDelS, vecTmpA, vecTmpB;
     cusparseSpGEMMDescr_t spgemmDescr;
+
+    cusparseMatDescr_t matDescrGen;
+    checkCudaErrors(cusparseCreateMatDescr(&matDescrGen));
+    checkCudaErrors(cusparseSetMatType(matDescrGen, CUSPARSE_MATRIX_TYPE_GENERAL));
+    checkCudaErrors(cusparseSetMatIndexBase(matDescrGen, CUSPARSE_INDEX_BASE_ZERO));
 
     // AT
     int64_t AT_nrows = node.ncols, AT_ncols = node.nrows, AT_nnz = node.nnz;
@@ -547,16 +554,16 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
                                       CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
                                       CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
 
-    // DA
-    int64_t DA_nrows = node.ncols, DA_ncols = node.nrows, DA_nnz = 0, DA_currNnz = 0;
-    int *d_DAoffs = NULL, *d_DAinds = NULL;
-    double *d_DAvals = NULL;
-    cusparseSpMatDescr_t DA_descr;
+    // AD
+    int64_t AD_nrows = node.nrows, AD_ncols = node.ncols, AD_nnz = 0, AD_currNnz = 0;
+    int *d_ADoffs = NULL, *d_ADinds = NULL;
+    double *d_ADvals = NULL;
+    cusparseSpMatDescr_t AD_descr;
 
-    checkCudaErrors(cudaMalloc((void **)&d_DAoffs, sizeof(int) * (DA_nrows + 1)));
+    checkCudaErrors(cudaMalloc((void **)&d_ADoffs, sizeof(int) * (AD_nrows + 1)));
 
-    checkCudaErrors(cusparseCreateCsr(&DA_descr, DA_nrows, DA_ncols, DA_nnz,
-                                      d_DAoffs, d_DAinds, d_DAvals,
+    checkCudaErrors(cusparseCreateCsr(&AD_descr, AD_nrows, AD_ncols, AD_nnz,
+                                      d_ADoffs, d_ADinds, d_ADvals,
                                       CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
                                       CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
 
@@ -625,6 +632,10 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
     checkCudaErrors(cudaMalloc((void **)&d_y, sizeof(double) * node.nrows));
     checkCudaErrors(cudaMalloc((void **)&d_s, sizeof(double) * node.ncols));
 
+    checkCudaErrors(cudaMalloc((void **)&d_delX, sizeof(double) * node.ncols));
+    checkCudaErrors(cudaMalloc((void **)&d_delY, sizeof(double) * node.nrows));
+    checkCudaErrors(cudaMalloc((void **)&d_delS, sizeof(double) * node.ncols));
+
     checkCudaErrors(cudaMemcpyAsync(d_x, node.h_x, sizeof(double) * node.ncols, cudaMemcpyHostToDevice, node.cudaStream));
     checkCudaErrors(cudaMemcpyAsync(d_y, node.h_y, sizeof(double) * node.nrows, cudaMemcpyHostToDevice, node.cudaStream));
     checkCudaErrors(cudaMemcpyAsync(d_s, node.h_s, sizeof(double) * node.ncols, cudaMemcpyHostToDevice, node.cudaStream));
@@ -644,6 +655,12 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
 
     checkCudaErrors(cusparseCreateDnVec(&vecX, (int64_t)node.ncols, d_x, CUDA_R_64F));
     checkCudaErrors(cusparseCreateDnVec(&vecY, (int64_t)node.nrows, d_y, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&vecS, (int64_t)node.ncols, d_s, CUDA_R_64F));
+
+    checkCudaErrors(cusparseCreateDnVec(&vecDelX, (int64_t)node.ncols, d_delX, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&vecDelY, (int64_t)node.nrows, d_delY, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&vecDelS, (int64_t)node.ncols, d_delS, CUDA_R_64F));
+
     checkCudaErrors(cusparseCreateDnVec(&vecResC, (int64_t)node.ncols, d_resC, CUDA_R_64F));
     checkCudaErrors(cusparseCreateDnVec(&vecResB, (int64_t)node.nrows, d_resB, CUDA_R_64F));
 
@@ -725,7 +742,7 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
         cudaDeviceSynchronize();
         elem_mult_kernel<<<bSize, 32>>>(d_x, d_invS, d_Dvals, node.ncols);
 
-        ///////////////             COMPUTE DA
+        ///////////////             COMPUTE AD
         {
             alpha = 1.0;
             beta = 0.0;
@@ -737,8 +754,8 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
             checkCudaErrors(cusparseSpGEMM_workEstimation(node.cusparseHandle,
                                                   CUSPARSE_OPERATION_NON_TRANSPOSE,
                                                   CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                                  &alpha, D_descr, AT_descr,
-                                                  &beta, DA_descr,
+                                                  &alpha, node.matDescr, D_descr,
+                                                  &beta, AD_descr,
                                                   CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
                                                   spgemmDescr, &bufferSize1, NULL));
 
@@ -753,8 +770,8 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
             checkCudaErrors(cusparseSpGEMM_workEstimation(node.cusparseHandle,
                                                   CUSPARSE_OPERATION_NON_TRANSPOSE,
                                                   CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                                  &alpha, D_descr, AT_descr,
-                                                  &beta, DA_descr,
+                                                  &alpha, node.matDescr, D_descr,
+                                                  &beta, AD_descr,
                                                   CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
                                                   spgemmDescr, &bufferSize1, d_buffer1));
 
@@ -762,8 +779,8 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
             checkCudaErrors(cusparseSpGEMM_compute(node.cusparseHandle,
                                            CUSPARSE_OPERATION_NON_TRANSPOSE,
                                            CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                           &alpha, D_descr, AT_descr,
-                                           &beta, DA_descr,
+                                           &alpha, node.matDescr, D_descr,
+                                           &beta, AD_descr,
                                            CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
                                            spgemmDescr, &bufferSize2, NULL));
 
@@ -777,31 +794,31 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
             checkCudaErrors(cusparseSpGEMM_compute(node.cusparseHandle,
                                            CUSPARSE_OPERATION_NON_TRANSPOSE,
                                            CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                           &alpha, D_descr, AT_descr,
-                                           &beta, DA_descr,
+                                           &alpha, node.matDescr, D_descr,
+                                           &beta, AD_descr,
                                            CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
                                            spgemmDescr, &bufferSize2, d_buffer2));
 
             // get matrix DA non-zero entries
-            cusparseSpMatGetSize(DA_descr, &DA_nrows, &DA_ncols, &DA_nnz);
+            cusparseSpMatGetSize(AD_descr, &AD_nrows, &AD_ncols, &AD_nnz);
 
             // allocate matrix DA
-            if (DA_nnz > DA_currNnz)
+            if (AD_nnz > AD_currNnz)
             {
-                DA_currNnz = DA_nnz;
-                checkCudaErrors(cudaMalloc((void **)&d_DAinds, sizeof(int) * DA_currNnz));
-                checkCudaErrors(cudaMalloc((void **)&d_DAvals, sizeof(double) * DA_currNnz));
+                AD_currNnz = AD_nnz;
+                checkCudaErrors(cudaMalloc((void **)&d_ADinds, sizeof(int) * AD_currNnz));
+                checkCudaErrors(cudaMalloc((void **)&d_ADvals, sizeof(double) * AD_currNnz));
             }
 
             // update DA with the new pointers
-            checkCudaErrors(cusparseCsrSetPointers(DA_descr, d_DAoffs, d_DAinds, d_DAvals));
+            checkCudaErrors(cusparseCsrSetPointers(AD_descr, d_ADoffs, d_ADinds, d_ADvals));
 
             // copy the final products to the matrix AAT
             checkCudaErrors(cusparseSpGEMM_copy(node.cusparseHandle,
                                         CUSPARSE_OPERATION_NON_TRANSPOSE,
                                         CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                        &alpha, D_descr, AT_descr,
-                                        &beta, DA_descr,
+                                        &alpha, node.matDescr, D_descr,
+                                        &beta, AD_descr,
                                         CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT, spgemmDescr));
 
             checkCudaErrors(cusparseSpGEMM_destroyDescr(spgemmDescr));
@@ -819,7 +836,7 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
             checkCudaErrors(cusparseSpGEMM_workEstimation(node.cusparseHandle,
                                                   CUSPARSE_OPERATION_NON_TRANSPOSE,
                                                   CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                                  &alpha, node.matDescr, DA_descr,
+                                                  &alpha, AD_descr, AT_descr,
                                                   &beta, ADA_descr,
                                                   CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
                                                   spgemmDescr, &bufferSize1, NULL));
@@ -835,7 +852,7 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
             checkCudaErrors(cusparseSpGEMM_workEstimation(node.cusparseHandle,
                                                   CUSPARSE_OPERATION_NON_TRANSPOSE,
                                                   CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                                  &alpha, node.matDescr, DA_descr,
+                                                  &alpha, AD_descr, AT_descr,
                                                   &beta, ADA_descr,
                                                   CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
                                                   spgemmDescr, &bufferSize1, d_buffer1));
@@ -844,7 +861,7 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
             checkCudaErrors(cusparseSpGEMM_compute(node.cusparseHandle,
                                            CUSPARSE_OPERATION_NON_TRANSPOSE,
                                            CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                           &alpha, node.matDescr, DA_descr,
+                                           &alpha, AD_descr, AT_descr,
                                            &beta, ADA_descr,
                                            CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
                                            spgemmDescr, &bufferSize2, NULL));
@@ -859,7 +876,7 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
             checkCudaErrors(cusparseSpGEMM_compute(node.cusparseHandle,
                                            CUSPARSE_OPERATION_NON_TRANSPOSE,
                                            CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                           &alpha, node.matDescr, DA_descr,
+                                           &alpha, AD_descr, AT_descr,
                                            &beta, ADA_descr,
                                            CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
                                            spgemmDescr, &bufferSize2, d_buffer2));
@@ -882,7 +899,7 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
             checkCudaErrors(cusparseSpGEMM_copy(node.cusparseHandle,
                                         CUSPARSE_OPERATION_NON_TRANSPOSE,
                                         CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                        &alpha, node.matDescr, DA_descr,
+                                        &alpha, AD_descr, AT_descr,
                                         &beta, ADA_descr,
                                         CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT, spgemmDescr));
 
@@ -890,21 +907,21 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
         }
 
         ///////////////////             TEST
-        double *d_ADn = NULL;
-        checkCudaErrors(cudaMalloc((void **)&d_ADn, sizeof(double) * ADA_nrows * ADA_ncols));
+        // double *d_ADn = NULL;
+        // checkCudaErrors(cudaMalloc((void **)&d_ADn, sizeof(double) * ADA_nrows * ADA_ncols));
 
-        cusparseMatDescr_t matGenDescr;
-        checkCudaErrors(cusparseCreateMatDescr(&matGenDescr));
-        checkCudaErrors(cusparseSetMatType(matGenDescr, CUSPARSE_MATRIX_TYPE_GENERAL));
-        checkCudaErrors(cusparseSetMatIndexBase(matGenDescr, CUSPARSE_INDEX_BASE_ZERO));
+        // cusparseMatDescr_t matGenDescr;
+        // checkCudaErrors(cusparseCreateMatDescr(&matGenDescr));
+        // checkCudaErrors(cusparseSetMatType(matGenDescr, CUSPARSE_MATRIX_TYPE_GENERAL));
+        // checkCudaErrors(cusparseSetMatIndexBase(matGenDescr, CUSPARSE_INDEX_BASE_ZERO));
 
-        checkCudaErrors(cusparseDcsr2dense(node.cusparseHandle, ADA_nrows, ADA_ncols,
-                                           matGenDescr, // CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO
-                                           d_ADAvals, d_ADAoffs, d_ADAinds,
-                                           d_ADn, ADA_nrows));
+        // checkCudaErrors(cusparseDcsr2dense(node.cusparseHandle, ADA_nrows, ADA_ncols,
+        //                                    matGenDescr, // CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO
+        //                                    d_ADAvals, d_ADAoffs, d_ADAinds,
+        //                                    d_ADn, ADA_nrows));
 
-        utils_printDmat(ADA_nrows, ADA_ncols, ADA_nrows, d_ADn, true, false);
-        checkCudaErrors(cudaFree(d_ADn));
+        // utils_printDmat(ADA_nrows, ADA_ncols, ADA_nrows, d_ADn, true, false);
+        // checkCudaErrors(cudaFree(d_ADn));
 
         // printf("OFFS:\n");
         // utils_printIvec(A_nrows+1, d_csrAOffs, true);
@@ -914,7 +931,146 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
         // utils_printDvec(A_nnz, d_csrAVals, true);
         ///////////////////             END TEST
 
+        ///////////////             COMPUTE TMPA = (-resB) - AD * resC
+
+        // store TMPA vector on buffer 1, size of buffer 1 is guaranteed to 
+        // be >= 2*ncols, copy resB on TMPA
+        // resB is already negative signed
+        d_tmpA = d_buffer1;
+        d_tmpB = &d_buffer1[node.ncols];
+        checkCudaErrors(cusparseCreateDnVec(&vecTmpA, AD_nrows, d_tmpA, CUDA_R_64F));
+        checkCudaErrors(cudaMemcpyAsync(d_tmpA, d_resB, sizeof(double) * AD_nrows, cudaMemcpyDeviceToDevice, node.cudaStream));
+
+        // compute TMPB
+        elem_mult_kernel<<<bSize, 32>>>(d_resXS, d_invS, d_tmpB, node.ncols);
+        checkCudaErrors(cusparseCreateDnVec(&vecTmpB, AD_ncols, d_tmpB, CUDA_R_64F));
+
+        {    
+            alpha = -1.0;
+            beta = 1.0;
+
+            // buffer 1 used for TMPA and TMPB
+            checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, AD_descr, vecResC,
+                        &beta, vecTmpA, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        &bufferSize2));
+
+            if (bufferSize2 > currBufferSize2)
+            {
+                currBufferSize2 = bufferSize2;
+                checkCudaErrors(cudaMalloc((void **)&d_buffer2, currBufferSize2));
+            }
+
+            checkCudaErrors(cusparseSpMV(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, AD_descr, vecResC,
+                        &beta, vecTmpA, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        d_buffer2));
+        }
+
+        ///////////////             COMPUTE TMPA = TMPA + A * TMPB
+        {    
+            alpha = 1.0;
+            beta = 1.0;
+
+            cudaDeviceSynchronize();
+
+            // buffer 1 used for TMPA and TMPB
+            checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, node.matDescr, vecTmpB,
+                        &beta, vecTmpA, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        &bufferSize2));
+
+            if (bufferSize2 > currBufferSize2)
+            {
+                currBufferSize2 = bufferSize2;
+                checkCudaErrors(cudaMalloc((void **)&d_buffer2, currBufferSize2));
+            }
+
+            checkCudaErrors(cusparseSpMV(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, node.matDescr, vecTmpB,
+                        &beta, vecTmpA, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        d_buffer2));
+        }
+
+        ///////////////             COMPUTE DEL_Y = SOLVE(ADA, TMPA)
+        {
+            checkCudaErrors(cusolverSpDcsrlsvqr(node.cusolverSpHandle,
+                                            ADA_nrows, ADA_nnz, matDescrGen,
+                                            d_ADAvals, d_ADAoffs, d_ADAinds,
+                                            d_tmpA,
+                                            node.env->MEHROTRA_CHOL_TOL, reorder,
+                                            d_delY, &singularity));
+        }
+
+        ///////////////             COMPUTE DEL_S = (-resC) - AT * DEL_Y
+        checkCudaErrors(cudaMemcpyAsync(d_delS, d_resC, sizeof(double) * AT_nrows, cudaMemcpyDeviceToDevice, node.cudaStream));
+
+        {
+            alpha = -1.0;
+            beta = 1.0;
+
+            // buffer 1 used for TMPA and TMPB
+            checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, AT_descr, vecDelY,
+                        &beta, vecDelS, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        &bufferSize2));
+
+            if (bufferSize2 > currBufferSize2)
+            {
+                currBufferSize2 = bufferSize2;
+                checkCudaErrors(cudaMalloc((void **)&d_buffer2, currBufferSize2));
+            }
+
+            checkCudaErrors(cusparseSpMV(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, AT_descr, vecDelY,
+                        &beta, vecDelS, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        d_buffer2));   
+        }
+
+        ///////////////             COMPUTE DEL_X = -TMP_B - D * DEL_S
+        checkCudaErrors(cudaMemcpyAsync(d_delX, d_tmpB, sizeof(double) * D_nrows, cudaMemcpyDeviceToDevice, node.cudaStream));
+
+        {
+            alpha = -1.0;
+            beta = -1.0;
+
+            // buffer 1 used for TMPA and TMPB
+            checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, D_descr, vecDelS,
+                        &beta, vecDelX, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        &bufferSize2));
+
+            if (bufferSize2 > currBufferSize2)
+            {
+                currBufferSize2 = bufferSize2;
+                checkCudaErrors(cudaMalloc((void **)&d_buffer2, currBufferSize2));
+            }
+
+            checkCudaErrors(cusparseSpMV(node.cusparseHandle,
+                        CUSPARSE_OPERATION_NON_TRANSPOSE, &alpha, D_descr, vecDelS,
+                        &beta, vecDelX, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
+                        d_buffer2));   
+        }
+
+        printf("delta X\n");
+        utils_printDvec(node.ncols, d_delX, true);
+        printf("delta Y\n");
+        utils_printDvec(node.nrows, d_delY, true);
+        printf("delta S\n");
+        utils_printDvec(node.ncols, d_delS, true);
+
         break;
+
+        // affine step length, definition 14.32 at page 408(427)
+        // alpha_max_p = min([-xi / delta_xi for xi, delta_xi in zip(x, delta_x_aff) if delta_xi < 0.0])
+        // alpha_max_d = min([-si / delta_si for si, delta_si in zip(s, delta_s_aff) if delta_si < 0.0])
+
+        // finding alphaMaxPrim and alphaMaxDual: to improve
+        find_alpha_max(&alphaMaxPrim, &alphaMaxDual,
+                       d_x, d_delX, d_s, d_delS, node.ncols);
+
+        alphaPrim = gsl_min(1.0, alphaMaxPrim);
+        alphaDual = gsl_min(1.0, alphaMaxDual);
 
         ++iterations;
     }
@@ -942,6 +1098,10 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
     checkCudaErrors(cudaFree(d_x));
     checkCudaErrors(cudaFree(d_y));
     checkCudaErrors(cudaFree(d_s));
+
+    checkCudaErrors(cudaFree(d_delX));
+    checkCudaErrors(cudaFree(d_delY));
+    checkCudaErrors(cudaFree(d_delS));
     
     checkCudaErrors(cudaFree(d_resC));
     checkCudaErrors(cudaFree(d_resB));
@@ -949,9 +1109,11 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
     
     checkCudaErrors(cudaFree(d_invS));
     
+    checkCudaErrors(cusparseDestroyMatDescr(matDescrGen));
+
     cusparseDestroySpMat(AT_descr);
     cusparseDestroySpMat(D_descr);
-    cusparseDestroySpMat(DA_descr);
+    cusparseDestroySpMat(AD_descr);
     cusparseDestroySpMat(ADA_descr);
 
     checkCudaErrors(cudaFree(d_AToffs));
@@ -962,9 +1124,9 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
     checkCudaErrors(cudaFree(d_Doffs));
     checkCudaErrors(cudaFree(d_Dinds));
 
-    checkCudaErrors(cudaFree(d_DAvals));
-    checkCudaErrors(cudaFree(d_DAoffs));
-    checkCudaErrors(cudaFree(d_DAinds));
+    checkCudaErrors(cudaFree(d_ADvals));
+    checkCudaErrors(cudaFree(d_ADoffs));
+    checkCudaErrors(cudaFree(d_ADinds));
 
     checkCudaErrors(cudaFree(d_ADAvals));
     checkCudaErrors(cudaFree(d_ADAoffs));
