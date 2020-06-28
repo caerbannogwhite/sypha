@@ -293,7 +293,7 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
 
         // x, s multiplication and res XS update: to improve
         //elem_min_mult_hybr(d_x, d_s, d_resXS, node.ncols);
-        elem_min_mult_host(d_x, d_s, d_resXS, node.ncols);
+        elem_min_mult_dev(d_x, d_s, d_resXS, node.ncols);
         
         checkCudaErrors(cusolverSpDcsrlsvqr(node.cusolverSpHandle,
                                             A_nrows, A_nnz, A_descr,
@@ -326,26 +326,8 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
         // alpha_max_d = min([-si / delta_si for si, delta_si in zip(s, delta_s_aff) if delta_si < 0.0])
 
         // finding alphaMaxPrim and alphaMaxDual: to improve
-        alphaMaxPrim = DBL_MAX;
-        alphaMaxDual = DBL_MAX;
-        for (j = 0; j < node.ncols; ++j)
-        {
-            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_x[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            checkCudaErrors(cudaMemcpyAsync(&beta, &d_deltaX[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            if (beta < 0.0)
-            {
-                alpha = -(alpha / beta);
-                alphaMaxPrim = alphaMaxPrim < alpha ? alphaMaxPrim : alpha;
-            }
-
-            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_s[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            checkCudaErrors(cudaMemcpyAsync(&beta, &d_deltaS[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            if (beta < 0.0)
-            {
-                alpha = -(alpha / beta);
-                alphaMaxPrim = alphaMaxPrim < alpha ? alphaMaxPrim : alpha;
-            }
-        }
+        find_alpha_max(&alphaMaxPrim, &alphaMaxDual,
+                       d_x, d_deltaX, d_s, d_deltaS, node.ncols);
 
         alphaPrim = gsl_min(1.0, alphaMaxPrim);
         alphaDual = gsl_min(1.0, alphaMaxDual);
@@ -410,26 +392,9 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
         ///////////////             END TEST
 
         // finding alphaMaxPrim and alphaMaxDual: to improve
-        alphaMaxPrim = DBL_MAX;
-        alphaMaxDual = DBL_MAX;
-        for (j = 0; j < node.ncols; ++j)
-        {
-            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_x[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            checkCudaErrors(cudaMemcpyAsync(&beta, &d_deltaX[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            if (beta < 0.0)
-            {
-                alpha = -(alpha / beta);
-                alphaMaxPrim = alphaMaxPrim < alpha ? alphaMaxPrim : alpha;
-            }
-
-            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_s[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            checkCudaErrors(cudaMemcpyAsync(&beta, &d_deltaS[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            if (beta < 0.0)
-            {
-                alpha = -(alpha / beta);
-                alphaMaxDual = alphaMaxDual < alpha ? alphaMaxDual : alpha;
-            }
-        }
+        // finding alphaMaxPrim and alphaMaxDual: to improve
+        find_alpha_max(&alphaMaxPrim, &alphaMaxDual,
+                       d_x, d_deltaX, d_s, d_deltaS, node.ncols);
 
         alphaPrim = gsl_min(1.0, node.env->MEHROTRA_ETA * alphaMaxPrim);
         alphaDual = gsl_min(1.0, node.env->MEHROTRA_ETA * alphaMaxDual);
@@ -488,7 +453,6 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
         ///////////////             END TEST
     }
 
-    
     node.iterations = iterations;
     
     checkCudaErrors(cublasDdot(node.cublasHandle, node.ncols,
@@ -539,53 +503,108 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
     int singularity = 0;
 
     int i = 0, j = 0, k = 0, iterations = 0;
-    size_t bufferSize = 0;
-    size_t currBufferSize = 0;
     double alpha, beta, alphaPrim, alphaDual, sigma, mu, muAff;
     double alphaMaxPrim, alphaMaxDual;
     double *d_bufferX = NULL;
     double *d_bufferS = NULL;
-    double *d_buffer = NULL;
 
     double *d_resC = NULL, *d_resB = NULL, *d_resXS = NULL;
-    double *d_x = NULL, *d_y = NULL, *d_s = NULL;
+    double *d_x = NULL, *d_y = NULL, *d_s = NULL, *d_invS = NULL;
     double *d_delX = NULL, *d_delY = NULL, *d_delS = NULL;
+
     char message[1024];
 
-    cusparseSpMatDescr_t spMatTransDescr;
     cusparseDnVecDescr_t vecX, vecY, vecResC, vecResB;
+    cusparseSpGEMMDescr_t spgemmDescr;
+
+    // AT
+    int64_t AT_nrows = node.ncols, AT_ncols = node.nrows, AT_nnz = node.nnz;
+    int *d_AToffs = NULL, *d_ATinds = NULL;
+    double *d_ATvals = NULL;
+    cusparseSpMatDescr_t AT_descr;
+
+    checkCudaErrors(cudaMalloc((void **)&d_AToffs, sizeof(int) * (AT_nrows + 1)));
+    checkCudaErrors(cudaMalloc((void **)&d_ATinds, sizeof(int) * AT_nnz));
+    checkCudaErrors(cudaMalloc((void **)&d_ATvals, sizeof(double) * AT_nnz));
+
+    checkCudaErrors(cusparseCreateCsr(&AT_descr, AT_nrows, AT_ncols, AT_nnz,
+                                      d_AToffs, d_ATinds, d_ATvals,
+                                      CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
+                                      CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
+
+    // D
+    int64_t D_nrows = node.ncols, D_ncols = node.ncols, D_nnz = node.ncols;
+    int *d_Doffs = NULL, *d_Dinds = NULL;
+    double *d_Dvals = NULL;
+    cusparseSpMatDescr_t D_descr;
+
+    checkCudaErrors(cudaMalloc((void **)&d_Doffs, sizeof(int) * (D_nrows + 1)));
+    checkCudaErrors(cudaMalloc((void **)&d_Dinds, sizeof(int) * D_nrows));
+    checkCudaErrors(cudaMalloc((void **)&d_Dvals, sizeof(double) * D_nrows));
+
+    checkCudaErrors(cusparseCreateCsr(&D_descr, D_nrows, D_ncols, D_nnz,
+                                      d_Doffs, d_Dinds, d_Dvals,
+                                      CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
+                                      CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
+
+    // DA
+    int64_t DA_nrows = node.ncols, DA_ncols = node.nrows, DA_nnz = 0, DA_currNnz = 0;
+    int *d_DAoffs = NULL, *d_DAinds = NULL;
+    double *d_DAvals = NULL;
+    cusparseSpMatDescr_t DA_descr;
+
+    checkCudaErrors(cudaMalloc((void **)&d_DAoffs, sizeof(int) * (DA_nrows + 1)));
+
+    checkCudaErrors(cusparseCreateCsr(&DA_descr, DA_nrows, DA_ncols, DA_nnz,
+                                      d_DAoffs, d_DAinds, d_DAvals,
+                                      CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
+                                      CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
+
+    // ADA
+    int64_t ADA_nrows = node.nrows, ADA_ncols = node.nrows, ADA_nnz = 0, ADA_currNnz = 0;
+    int *d_ADAoffs = NULL, *d_ADAinds = NULL;
+    double *d_ADAvals = NULL;
+    cusparseSpMatDescr_t ADA_descr;
+
+    checkCudaErrors(cudaMalloc((void **)&d_ADAoffs, sizeof(int) * (ADA_nrows + 1)));
+    
+    checkCudaErrors(cusparseCreateCsr(&ADA_descr, ADA_nrows, ADA_ncols, ADA_nnz,
+                                      d_ADAoffs, d_ADAinds, d_ADAvals,
+                                      CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
+                                      CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
+
+    // BUFFER
+    size_t bufferSize1 = 0;
+    size_t currBufferSize1 = (size_t)(sizeof(double) * node.ncols * 2);
+    double *d_buffer1 = NULL;
+
+    size_t bufferSize2 = 0;
+    size_t currBufferSize2 = 0;
+    double *d_buffer2 = NULL;
+
+    checkCudaErrors(cudaMalloc((void **)&d_buffer1, currBufferSize1));
 
     ///////////////////             GET TRANSPOSED MATRIX
 
-    int *d_csrMatTransOffs = NULL, *d_csrMatTransInds = NULL; 
-    double *d_csrMatTransVals = NULL;
-
-    checkCudaErrors(cudaMalloc((void **)&d_csrMatTransOffs, sizeof(int) * (node.ncols + 1)));
-    checkCudaErrors(cudaMalloc((void **)&d_csrMatTransInds, sizeof(int) * node.nnz));
-    checkCudaErrors(cudaMalloc((void **)&d_csrMatTransVals, sizeof(double) * node.nnz));
-
     checkCudaErrors(cusparseCsr2cscEx2_bufferSize(node.cusparseHandle, node.nrows, node.ncols, node.nnz,
                                                   node.d_csrMatVals, node.d_csrMatOffs, node.d_csrMatInds,
-                                                  d_csrMatTransVals, d_csrMatTransOffs, d_csrMatTransInds,
+                                                  d_ATvals, d_AToffs, d_ATinds,
                                                   CUDA_R_64F, CUSPARSE_ACTION_NUMERIC,
                                                   CUSPARSE_INDEX_BASE_ZERO, CUSPARSE_CSR2CSC_ALG2,
-                                                  &bufferSize));
-    // buffer size for other needs
-    currBufferSize = (size_t)(sizeof(double) * node.ncols * 2);
-    currBufferSize = currBufferSize > bufferSize ? currBufferSize : bufferSize;
-    checkCudaErrors(cudaMalloc((void **)&d_buffer, currBufferSize));
+                                                  &bufferSize1));
+    
+    if (bufferSize1 > currBufferSize1)
+    {
+        currBufferSize1 = bufferSize1;
+        checkCudaErrors(cudaMalloc((void **)&d_buffer1, currBufferSize1));
+    }
 
     checkCudaErrors(cusparseCsr2cscEx2(node.cusparseHandle, node.nrows, node.ncols, node.nnz,
                                        node.d_csrMatVals, node.d_csrMatOffs, node.d_csrMatInds,
-                                       d_csrMatTransVals, d_csrMatTransOffs, d_csrMatTransInds,
+                                       d_ATvals, d_AToffs, d_ATinds,
                                        CUDA_R_64F, CUSPARSE_ACTION_NUMERIC,
                                        CUSPARSE_INDEX_BASE_ZERO, CUSPARSE_CSR2CSC_ALG2,
-                                       d_buffer));
-
-    checkCudaErrors(cusparseCreateCsr(&spMatTransDescr, node.ncols, node.nrows, node.nnz,
-                                      d_csrMatTransOffs, d_csrMatTransInds, d_csrMatTransVals,
-                                      CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
-                                      CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
+                                       d_buffer1));
 
     ///////////////////             GET STARTING POINT
     // initialise x, y, s
@@ -635,40 +654,39 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
     alpha = -1.0;
     beta = 1.0;
     checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                            &alpha, spMatTransDescr, vecY,
+                                            &alpha, AT_descr, vecY,
                                             &beta, vecResC, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
-                                            &bufferSize));
+                                            &bufferSize1));
 
-    // buffer size for other needs
-    if (bufferSize > currBufferSize)
+    if (bufferSize1 > currBufferSize1)
     {
-        currBufferSize = bufferSize;
-        checkCudaErrors(cudaMalloc((void **)&d_buffer, currBufferSize));
+        currBufferSize1 = bufferSize1;
+        checkCudaErrors(cudaMalloc((void **)&d_buffer1, currBufferSize1));
     }
 
     checkCudaErrors(cusparseSpMV(node.cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE,
-                                 &alpha, spMatTransDescr, vecY,
+                                 &alpha, AT_descr, vecY,
                                  &beta, vecResC, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
-                                 d_buffer));
+                                 d_buffer1));
 
     alpha = -1.0;
     beta = 1.0;
     checkCudaErrors(cusparseSpMV_bufferSize(node.cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE,
                                             &alpha, node.matDescr, vecX,
                                             &beta, vecResB, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
-                                            &bufferSize));
+                                            &bufferSize1));
 
-    if (bufferSize > currBufferSize)
+    if (bufferSize1 > currBufferSize1)
     {
-        currBufferSize = bufferSize;
-        checkCudaErrors(cudaMalloc((void **)&d_buffer, currBufferSize));
+        currBufferSize1 = bufferSize1;
+        checkCudaErrors(cudaMalloc((void **)&d_buffer1, currBufferSize1));
     }
 
     checkCudaErrors(cusparseSpMV(node.cusparseHandle,
                                  CUSPARSE_OPERATION_NON_TRANSPOSE,
                                  &alpha, node.matDescr, vecX,
                                  &beta, vecResB, CUDA_R_64F, CUSPARSE_CSRMV_ALG2,
-                                 (size_t *)d_buffer));
+                                 (size_t *)d_buffer1));
 
     ///////////////////             CALCULATE MU
     // duality measure, defined at page 395(414) Numerical Optimization
@@ -677,40 +695,280 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
 
     node.timePreSolEnd = node.env->timer();
 
-    ///////////////////             MAIN LOOP
+    ///////////////////             SET UP D AND INV(S)
+    
+    int bSize = (node.ncols >> 5) + 1;
 
+    checkCudaErrors(cudaMalloc((void **)&d_invS, sizeof(double) * node.ncols));
+    
+    cudaDeviceSynchronize();
+    range_kernel<<<bSize, 32>>>(d_Doffs, node.ncols + 1);
+    range_kernel<<<bSize, 32>>>(d_Dinds, node.ncols);
+    
+    ///////////////////             MAIN LOOP
+    
     node.env->logger("Starting Mehrotra proceduce", "INFO", 17);
     node.timeSolverStart = node.env->timer();
+
+    printf("MU = %lf\n", mu);
     
     iterations = 0;
-
     while ((iterations < node.env->MEHROTRA_MAX_ITER) && (mu > node.env->MEHROTRA_MU_TOL))
     {
+        // x, s multiplication and res XS update: to improve
+        //elem_min_mult_hybr(d_x, d_s, d_resXS, node.ncols);
+        cudaDeviceSynchronize();
+        elem_min_mult_kernel<<<bSize, 32>>>(d_x, d_s, d_resXS, node.ncols);
+
+        elem_inv_kernel<<<bSize, 32>>>(d_s, d_invS, node.ncols);
+
+        cudaDeviceSynchronize();
+        elem_mult_kernel<<<bSize, 32>>>(d_x, d_invS, d_Dvals, node.ncols);
+
+        ///////////////             COMPUTE DA
+        {
+            alpha = 1.0;
+            beta = 0.0;
+
+            // SpGEMM Computation
+            checkCudaErrors(cusparseSpGEMM_createDescr(&spgemmDescr));
+
+            // ask bufferSize1 bytes for external memory
+            checkCudaErrors(cusparseSpGEMM_workEstimation(node.cusparseHandle,
+                                                  CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                  CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                  &alpha, D_descr, AT_descr,
+                                                  &beta, DA_descr,
+                                                  CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
+                                                  spgemmDescr, &bufferSize1, NULL));
+
+            if (bufferSize1 > currBufferSize1)
+            {
+                currBufferSize1 = bufferSize1;
+                checkCudaErrors(cudaMalloc((void **)&d_buffer1, currBufferSize1));
+            }
+
+            // inspect the matrices D and AT to understand the memory requiremnent for
+            // the next step
+            checkCudaErrors(cusparseSpGEMM_workEstimation(node.cusparseHandle,
+                                                  CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                  CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                  &alpha, D_descr, AT_descr,
+                                                  &beta, DA_descr,
+                                                  CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
+                                                  spgemmDescr, &bufferSize1, d_buffer1));
+
+            // ask bufferSize2 bytes for external memory
+            checkCudaErrors(cusparseSpGEMM_compute(node.cusparseHandle,
+                                           CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                           CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                           &alpha, D_descr, AT_descr,
+                                           &beta, DA_descr,
+                                           CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
+                                           spgemmDescr, &bufferSize2, NULL));
+
+            if (bufferSize2 > currBufferSize2)
+            {
+                currBufferSize2 = bufferSize2;
+                checkCudaErrors(cudaMalloc((void **)&d_buffer2, currBufferSize2));
+            }
+
+            // compute the intermediate product of A * B
+            checkCudaErrors(cusparseSpGEMM_compute(node.cusparseHandle,
+                                           CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                           CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                           &alpha, D_descr, AT_descr,
+                                           &beta, DA_descr,
+                                           CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
+                                           spgemmDescr, &bufferSize2, d_buffer2));
+
+            // get matrix DA non-zero entries
+            cusparseSpMatGetSize(DA_descr, &DA_nrows, &DA_ncols, &DA_nnz);
+
+            // allocate matrix DA
+            if (DA_nnz > DA_currNnz)
+            {
+                DA_currNnz = DA_nnz;
+                checkCudaErrors(cudaMalloc((void **)&d_DAinds, sizeof(int) * DA_currNnz));
+                checkCudaErrors(cudaMalloc((void **)&d_DAvals, sizeof(double) * DA_currNnz));
+            }
+
+            // update DA with the new pointers
+            checkCudaErrors(cusparseCsrSetPointers(DA_descr, d_DAoffs, d_DAinds, d_DAvals));
+
+            // copy the final products to the matrix AAT
+            checkCudaErrors(cusparseSpGEMM_copy(node.cusparseHandle,
+                                        CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                        CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                        &alpha, D_descr, AT_descr,
+                                        &beta, DA_descr,
+                                        CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT, spgemmDescr));
+
+            checkCudaErrors(cusparseSpGEMM_destroyDescr(spgemmDescr));
+        }
+
+        ///////////////             COMPUTE ADA
+        {
+            alpha = 1.0;
+            beta = 0.0;
+
+            // SpGEMM Computation
+            checkCudaErrors(cusparseSpGEMM_createDescr(&spgemmDescr));
+
+            // ask bufferSize1 bytes for external memory
+            checkCudaErrors(cusparseSpGEMM_workEstimation(node.cusparseHandle,
+                                                  CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                  CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                  &alpha, node.matDescr, DA_descr,
+                                                  &beta, ADA_descr,
+                                                  CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
+                                                  spgemmDescr, &bufferSize1, NULL));
+
+            if (bufferSize1 > currBufferSize1)
+            {
+                currBufferSize1 = bufferSize1;
+                checkCudaErrors(cudaMalloc((void **)&d_buffer1, currBufferSize1));
+            }
+
+            // inspect the matrices A and DA to understand the memory requiremnent for
+            // the next step
+            checkCudaErrors(cusparseSpGEMM_workEstimation(node.cusparseHandle,
+                                                  CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                  CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                                  &alpha, node.matDescr, DA_descr,
+                                                  &beta, ADA_descr,
+                                                  CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
+                                                  spgemmDescr, &bufferSize1, d_buffer1));
+
+            // ask bufferSize2 bytes for external memory
+            checkCudaErrors(cusparseSpGEMM_compute(node.cusparseHandle,
+                                           CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                           CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                           &alpha, node.matDescr, DA_descr,
+                                           &beta, ADA_descr,
+                                           CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
+                                           spgemmDescr, &bufferSize2, NULL));
+
+            if (bufferSize2 > currBufferSize2)
+            {
+                currBufferSize2 = bufferSize2;
+                checkCudaErrors(cudaMalloc((void **)&d_buffer2, currBufferSize2));
+            }
+
+            // compute the intermediate product of A * DA
+            checkCudaErrors(cusparseSpGEMM_compute(node.cusparseHandle,
+                                           CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                           CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                           &alpha, node.matDescr, DA_descr,
+                                           &beta, ADA_descr,
+                                           CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT,
+                                           spgemmDescr, &bufferSize2, d_buffer2));
+
+            // get matrix ADA non-zero entries
+            cusparseSpMatGetSize(ADA_descr, &ADA_nrows, &ADA_ncols, &ADA_nnz);
+
+            // allocate matrix ADA
+            if (ADA_nnz > ADA_currNnz)
+            {
+                ADA_currNnz = ADA_nnz;
+                checkCudaErrors(cudaMalloc((void **)&d_ADAinds, sizeof(int) * ADA_currNnz));
+                checkCudaErrors(cudaMalloc((void **)&d_ADAvals, sizeof(double) * ADA_currNnz));
+            }
+
+            // update ADA with the new pointers
+            checkCudaErrors(cusparseCsrSetPointers(ADA_descr, d_ADAoffs, d_ADAinds, d_ADAvals));
+
+            // copy the final products to the matrix ADA
+            checkCudaErrors(cusparseSpGEMM_copy(node.cusparseHandle,
+                                        CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                        CUSPARSE_OPERATION_NON_TRANSPOSE,
+                                        &alpha, node.matDescr, DA_descr,
+                                        &beta, ADA_descr,
+                                        CUDA_R_64F, CUSPARSE_SPGEMM_DEFAULT, spgemmDescr));
+
+            checkCudaErrors(cusparseSpGEMM_destroyDescr(spgemmDescr));
+        }
+
+        ///////////////////             TEST
+        double *d_ADn = NULL;
+        checkCudaErrors(cudaMalloc((void **)&d_ADn, sizeof(double) * ADA_nrows * ADA_ncols));
+
+        cusparseMatDescr_t matGenDescr;
+        checkCudaErrors(cusparseCreateMatDescr(&matGenDescr));
+        checkCudaErrors(cusparseSetMatType(matGenDescr, CUSPARSE_MATRIX_TYPE_GENERAL));
+        checkCudaErrors(cusparseSetMatIndexBase(matGenDescr, CUSPARSE_INDEX_BASE_ZERO));
+
+        checkCudaErrors(cusparseDcsr2dense(node.cusparseHandle, ADA_nrows, ADA_ncols,
+                                           matGenDescr, // CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO
+                                           d_ADAvals, d_ADAoffs, d_ADAinds,
+                                           d_ADn, ADA_nrows));
+
+        utils_printDmat(ADA_nrows, ADA_ncols, ADA_nrows, d_ADn, true, false);
+        checkCudaErrors(cudaFree(d_ADn));
+
+        // printf("OFFS:\n");
+        // utils_printIvec(A_nrows+1, d_csrAOffs, true);
+        // printf("INDS:\n");
+        // utils_printIvec(A_nnz, d_csrAInds, true);
+        // printf("VALS:\n");
+        // utils_printDvec(A_nnz, d_csrAVals, true);
+        ///////////////////             END TEST
+
+        break;
 
         ++iterations;
     }
 
+    node.iterations = iterations;
+    
+    checkCudaErrors(cublasDdot(node.cublasHandle, node.ncols,
+                               d_x, 1, node.d_ObjDns, 1, &node.objvalPrim));
+
+    checkCudaErrors(cublasDdot(node.cublasHandle, node.nrows,
+                               d_y, 1, node.d_RhsDns, 1, &node.objvalDual));
+
+    node.env->logger("Mehrotra procedure complete", "INFO", 10);
     node.timeSolverEnd = node.env->timer();
 
-    ///////////////////             RELEASE RESOURCES
+    ///////////////////             RELEASE MEMORY
 
     free(node.h_x);
     free(node.h_y);
     free(node.h_s);
 
-    cusparseDestroySpMat(spMatTransDescr);
-
-    checkCudaErrors(cudaFree(d_csrMatTransOffs));
-    checkCudaErrors(cudaFree(d_csrMatTransInds));
-    checkCudaErrors(cudaFree(d_csrMatTransVals));
-
+    checkCudaErrors(cudaFree(d_buffer1));
+    checkCudaErrors(cudaFree(d_buffer2));
+    
     checkCudaErrors(cudaFree(d_x));
     checkCudaErrors(cudaFree(d_y));
     checkCudaErrors(cudaFree(d_s));
-
+    
     checkCudaErrors(cudaFree(d_resC));
     checkCudaErrors(cudaFree(d_resB));
     checkCudaErrors(cudaFree(d_resXS));
+    
+    checkCudaErrors(cudaFree(d_invS));
+    
+    cusparseDestroySpMat(AT_descr);
+    cusparseDestroySpMat(D_descr);
+    cusparseDestroySpMat(DA_descr);
+    cusparseDestroySpMat(ADA_descr);
+
+    checkCudaErrors(cudaFree(d_AToffs));
+    checkCudaErrors(cudaFree(d_ATinds));
+    checkCudaErrors(cudaFree(d_ATvals));
+    
+    checkCudaErrors(cudaFree(d_Dvals));
+    checkCudaErrors(cudaFree(d_Doffs));
+    checkCudaErrors(cudaFree(d_Dinds));
+
+    checkCudaErrors(cudaFree(d_DAvals));
+    checkCudaErrors(cudaFree(d_DAoffs));
+    checkCudaErrors(cudaFree(d_DAinds));
+
+    checkCudaErrors(cudaFree(d_ADAvals));
+    checkCudaErrors(cudaFree(d_ADAoffs));
+    checkCudaErrors(cudaFree(d_ADAinds));
 
     return CODE_SUCCESFULL;
 }

@@ -252,8 +252,8 @@ sypha_solver_dense : src/sypha_solver_dense.cpp
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
 	@mv $@.o bin
 
-sypha_solver_sparse : src/sypha_solver_sparse.cpp
-	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
+sypha_solver_sparse : src/sypha_solver_sparse.cu
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cu $(LIBRARIES)
 	@mv $@.o bin
 
 sypha_solver_utils : src/sypha_solver_utils.cu

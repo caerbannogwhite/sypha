@@ -23,26 +23,33 @@ double cpuSecond()
 	return ((double)tp.tv_sec + (double)tp.tv_usec*1.e-6);
 }
 
-__global__ void array_mult_kernel(double *A, double *B, double *C)
+__global__ void array_mult_kernel_1(double *A, double *B, double *C)
 {
-	C[blockIdx.x * blockDim.x + threadIdx.x] = A[blockIdx.x * blockDim.x + threadIdx.x] * 
-											   B[blockIdx.x * blockDim.x + threadIdx.x];
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	C[idx] = A[idx] * B[idx];
 }
 
-void array_mult_dev(double *d_A, double *d_B, double *d_C, int N)
+__global__ void array_mult_kernel_2(double *A, double *B, double *C, const int N)
 {
-	int bSize;
-	int tSize = 32;
-	
-	bSize = (N >> 5) + 1;
-	
-	//while (res > 128)
-	{
-		//bSize = res >> 5; // 32 = 2 ^ 5
-		array_mult_kernel<<<bSize, tSize>>>(d_A, d_B, d_C);
-	}
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < N)
+		C[idx] = A[idx] * B[idx];
+}
+
+void array_mult_dev_1(double *d_A, double *d_B, double *d_C, int N)
+{
+	int bSize = (N >> 5) + 1;
+	array_mult_kernel_1<<<bSize, 32>>>(d_A, d_B, d_C);
 	cudaDeviceSynchronize();
 }
+
+void array_mult_dev_2(double *d_A, double *d_B, double *d_C, int N)
+{
+	int bSize = (N >> 5) + 1;
+	array_mult_kernel_2<<<bSize, 32>>>(d_A, d_B, d_C, N);
+	cudaDeviceSynchronize();
+}
+
 
 void array_mult_host_naive(double *A, double *B, double *C, const int N)
 {
@@ -100,7 +107,7 @@ void array_mult_host_hybr(double *d_A, double *d_B, double *d_C, int N)
 		int bSize = N / 1024;
 		off = bSize * 1024;
 		N -= off;
-		array_mult_kernel<<<bSize, 32>>>(d_A, d_B, d_C);
+		array_mult_kernel_1<<<bSize, 32>>>(d_A, d_B, d_C);
 	}
 	
 	array_mult_host_test_2(&d_A[off], &d_B[off], &d_C[off], N);
@@ -197,21 +204,38 @@ void launchTest(int N, int repeat)
 	}
 	printf("%30s - %12.9lf ms\n", "array_mult_host_hybr", (sum / repeat * 1000));
 	
+	sum = 0;
+	for (int i = 0; i < repeat; ++i)
+	{
+		tStart = cpuSecond();
+		array_mult_dev_1(d_A, d_B, d_C, N);
+		tEnd = cpuSecond();
+		sum += (tEnd - tStart);
+	}
+	printf("%30s - %12.9lf ms\n", "array_mult_dev_1", (sum / repeat * 1000));
+
+	sum = 0;
+	for (int i = 0; i < repeat; ++i)
+	{
+		tStart = cpuSecond();
+		array_mult_dev_2(d_A, d_B, d_C, N);
+		tEnd = cpuSecond();
+		sum += (tEnd - tStart);
+	}
+	printf("%30s - %12.9lf ms\n", "array_mult_dev_2", (sum / repeat * 1000));
+	
+	
 	array_mult_host_hybr(d_A, d_B, d_C, N);
 	array_mult_host_naive(h_A, h_B, h_C, N);
 	checkResult(h_C, d_C, N);
+
+	array_mult_dev_1(d_A, d_B, d_C, N);
+	//array_mult_host_naive(h_A, h_B, h_C, N);
+	checkResult(h_C, d_C, N);
 	
-	// sum = 0;
-	// for (int i = 0; i < repeat; ++i)
-	// {
-	// 	tStart = cpuSecond();
-	// 	array_mult_dev(d_A, d_B, d_C, N);
-	// 	tEnd = cpuSecond();
-	// 	sum += (tEnd - tStart);
-	// }
-	// printf("%30s - %12.9lf ms\n", "array_mult_dev", (sum / repeat * 1000));
-	// array_mult_host_naive(h_A, h_B, h_C, N);
-	// checkResult(h_C, d_C, N);
+	array_mult_dev_2(d_A, d_B, d_C, N);
+	//array_mult_host_naive(h_A, h_B, h_C, N);
+	checkResult(h_C, d_C, N);
 
 	free(h_A);
 	free(h_B);
