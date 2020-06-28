@@ -55,7 +55,8 @@ for instance, to get cuda 11.0 just run
 * **SYPHA-1: `sypha_node_sparse` - change X, S matrix update phase on `solver_sparse_merhrotra` using cublas copy**
 * **SYPHA-2: `sypha_node_sparse` - update the procedure to find `alphaMaxPrim` and `alphaMaxDual` on `solver_sparse_merhrotra` using device kernels**
 * SYPHA-3: `sypha_node_sparse` - improve initialization of big matrix A
-* SYPHA-4: `sypha_node_sparse` - develop the Merhrotra procedure not using the big matrix A and test performances
+* **SYPHA-4: `sypha_node_sparse` - develop the Merhrotra procedure not using the big matrix A and test** performances
 * SYPHA-5: check file path before reading it
 * SYPHA-6: add a good logger to the environment
 * SYPHA-7: add an web API interface
+* SYPHA-8: use Cholesky to solve linear systems

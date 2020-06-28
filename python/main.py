@@ -33,7 +33,7 @@ def launch(instance, solver):
                             x, y, s, iterations = mehrotra_linopt_dense_test(mat, rhs, obj)                        
 
                     elif  solver == "sparse":
-                        mat, rhs, obj = sc_sparse_model_reader(path)
+                        mat, rhs, obj = sc_sparse_model_reader(BASE_DIR + entry)
                         mat, rhs, obj = sc_sparse_to_standard_form(mat, rhs, obj)
 
                         x, y, s, iterations = mehrotra_linopt_sparse(mat, rhs, obj)

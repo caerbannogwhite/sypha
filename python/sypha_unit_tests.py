@@ -90,7 +90,7 @@ def exec_sypha(inst, solution, repeat):
 
     for i in range(repeat):
         log_file_name = f"{inst}_test_{i}_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
-        os.system(f"{BASE_DIR}/sypha --model SCP --verbosity 1 "
+        os.system(f"{BASE_DIR}/sypha --model SCP --verbosity 1 --tol-mu 1.E-8 "
                   f"--input-file {BASE_DIR}/data/{inst}.txt > {log_file_name}")
     
         file_handler = open(log_file_name, "r")
@@ -132,13 +132,13 @@ def exec_sypha(inst, solution, repeat):
     data["repeat"] = repeat
     data["iterations_mean"] = mean(iterations)
     data["start_sol_time_mean"] = mean(start_sol_times)
-    data["start_sol_time_std"] = stdev(start_sol_times)
+    data["start_sol_time_std"] = 0.0 if len(start_sol_times) < 2 else stdev(start_sol_times)
     data["pre_sol_time_mean"] = mean(pre_sol_times)
-    data["pre_sol_time_std"] = stdev(pre_sol_times)
+    data["pre_sol_time_std"] = 0.0 if len(pre_sol_times) < 2 else stdev(pre_sol_times)
     data["solver_time_mean"] = mean(solver_times)
-    data["solver_time_std"] = stdev(solver_times)
+    data["solver_time_std"] = 0.0 if len(solver_times) < 2 else stdev(solver_times)
     data["total_time_mean"] = mean(total_times)
-    data["total_time_std"] = stdev(total_times)
+    data["total_time_std"] = 0.0 if len(total_times) < 2 else stdev(total_times)
 
     return data
 
@@ -195,8 +195,8 @@ def launch_tests(match, repeat):
 
 if __name__ == "__main__":
     parser = ArgumentParser("Sypha unit tests.")
-    parser.add_argument("--test-match", dest="match", type=str, help="")
-    parser.add_argument("--repeat", dest="repeat", type=int, help="Number of repetition")
+    parser.add_argument("-m", "--test-match", dest="match", type=str, help="")
+    parser.add_argument("-r", "--repeat", dest="repeat", type=int, help="Number of repetition")
 
     args = parser.parse_args()
     launch_tests(args.match, args.repeat)

@@ -113,6 +113,18 @@ def mehrotra_linopt_dense(mat: numpy.array,
         s_inv = 1 / s
         D = numpy.diag(x * s_inv)
         ADA = mat.dot(D.dot(mat.T))
+
+        #print(f"{iterations}) START")
+        #print("X")
+        #print_vec(x)
+        #print("INV(S)")
+        #print_vec(s_inv)
+        #print("D")
+        #print_vec(x * s_inv)
+        #print("RES B")
+        #print_vec(r_b)
+        #print("RES C")
+        #print_vec(r_c)
         
         # affine step
         vec1 = s_inv * r_xs
@@ -120,13 +132,13 @@ def mehrotra_linopt_dense(mat: numpy.array,
         delta_s_aff = -r_c - mat.T.dot(delta_y_aff)
         delta_x_aff = -vec1 - D.dot(delta_s_aff)
 
-        # print("PRE AFFINE SYSTEM")
-        # print(f"\n\niter: {iterations}")
-        # print(f"X:\n{x}")
-        # print(f"Y:\n{y}")
-        # print(f"S:\n{s}")
-        # print(f"delta X:\n{delta_x_aff}")
-        # print(f"delta S:\n{delta_s_aff}")
+        #print(f"{iterations}) AFFINE SYSTEM")
+        #print("delta X")
+        #print_vec(delta_x_aff)
+        #print("delta Y")
+        #print_vec(delta_y_aff)
+        #print("delta S")
+        #print_vec(delta_s_aff)
         
         # affine step length, definition 14.32 at page 408(427)
         alpha_max_p = min([-xi / delta_xi for xi, delta_xi in zip(x, delta_x_aff) if delta_xi < 0.0])
@@ -153,12 +165,13 @@ def mehrotra_linopt_dense(mat: numpy.array,
         delta_s = -r_c - mat.T.dot(delta_y)
         delta_x = -vec1 - D.dot(delta_s)
 
-        # print(f"\n\n{iterations:4d}) AFTER CORRECTION SYSTEM")
-        # print(f"X:\n{x}")
-        # print(f"Y:\n{y}")
-        # print(f"S:\n{s}")
-        # print(f"delta X:\n{delta_x}")
-        # print(f"delta S:\n{delta_s}")
+        #print(f"{iterations}) CORRECTION SYSTEM")
+        #print("delta X")
+        #print_vec(delta_x)
+        #print("delta Y")
+        #print_vec(delta_y)
+        #print("delta S")
+        #print_vec(delta_s)
         
         alpha_max_p = min([-xi / delta_xi for xi, delta_xi in zip(x, delta_x) if delta_xi < 0.0])
         alpha_max_d = min([-si / delta_si for si, delta_si in zip(s, delta_s) if delta_si < 0.0])
