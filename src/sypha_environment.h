@@ -15,7 +15,9 @@ class SyphaNodeSparse;
 class SyphaEnvironment
 {
 private:
+    SyphaStatus internalStatus;
     string test;
+    int testRepeat;
     string inputFilePath;
     ModelInputType modelType;
     bool sparse;
@@ -32,16 +34,20 @@ private:
     double PX_TOLERANCE;
 
     // Merhrotra parameters
-    int MERHROTRA_MAX_ITER = 1000;
-    double MERHROTRA_ETA = 0.9;
-    double MERHROTRA_MU_TOL = 1.E-10;
-    double MERHROTRA_CHOL_TOL = 1.E-16;
+    int MEHROTRA_MAX_ITER = 1000;
+    double MEHROTRA_ETA = 0.95;
+    double MEHROTRA_MU_TOL = 1.E-4;
+    double MEHROTRA_CHOL_TOL = 1.E-8;
 
 public:
     SyphaEnvironment();
     SyphaEnvironment(int argc, char *argv[]);
 
+    int getVerbosityLevel();
     std::string getTest();
+    SyphaStatus getStatus();
+
+    double timer();
 
     SyphaStatus setDefaultParameters();
     SyphaStatus setUpDevice();
@@ -52,12 +58,18 @@ public:
     friend class SyphaNodeDense;
     friend class SyphaNodeSparse;
 
-    friend SyphaStatus solver_dense_merhrotra(SyphaNodeDense &node);
-    friend SyphaStatus solver_dense_merhrotra_init(SyphaNodeDense &node);
-    friend SyphaStatus solver_sparse_merhrotra(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_merhrotra_init_1(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_merhrotra_init_2(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_merhrotra_init_gsl(SyphaNodeSparse &node);
+    friend SyphaStatus solver_dense_mehrotra(SyphaNodeDense &node);
+    friend SyphaStatus solver_dense_mehrotra_init(SyphaNodeDense &node);
+    friend SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_mehrotra_init_1(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node);
+
+    ///////////////////             UNIT TESTS
+    friend int test_launcher(SyphaEnvironment &env);
+    friend int sypha_test_scp4(SyphaEnvironment &env, int &pass);
+    friend int sypha_test_scp5(SyphaEnvironment &env, int &pass);
 };
 
 #endif // SYPHA_ENVIRONMENT_H

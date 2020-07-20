@@ -108,39 +108,26 @@ def mehrotra_linopt_dense(mat: numpy.array,
 
         #print((x > 0.0).all(), (s > 0.0).all(), mu)
 
-        X = numpy.diag(x)
-        S = numpy.diag(s)
-        r_xs = X.dot(S).dot(numpy.ones(n))
+        r_xs = x * s
 
-        S_inv = numpy.linalg.inv(S)
-        D = X.dot(S_inv)
+        s_inv = 1 / s
+        D = numpy.diag(x * s_inv)
         ADA = mat.dot(D.dot(mat.T))
         
         # affine step
-        delta_y_aff = numpy.linalg.solve(ADA, -r_b - mat.dot(D).dot(r_c) + mat.dot(S_inv.dot(r_xs)))
+        vec1 = s_inv * r_xs
+        delta_y_aff = numpy.linalg.solve(ADA, -r_b - mat.dot(D).dot(r_c) + mat.dot(vec1))
         delta_s_aff = -r_c - mat.T.dot(delta_y_aff)
-        delta_x_aff = -S_inv.dot(r_xs) - D.dot(delta_s_aff)
+        delta_x_aff = -vec1 - D.dot(delta_s_aff)
 
-        row_1 = numpy.hstack((numpy.zeros((n, n)), mat.T, numpy.eye(n, n)))
-        row_2 = numpy.hstack((mat, numpy.zeros((m, m)), numpy.zeros((m, n))))
-        row_3 = numpy.hstack((S, numpy.zeros((n, m)), X))
-        A = numpy.vstack((row_1, row_2, row_3))
-        b = numpy.hstack((-r_c, -r_b, -r_xs))
-        #sol = numpy.linalg.solve(A, b)
-        #delta_x_aff = sol[:n]
-        #delta_s_aff = sol[n+m:]
-
-        print("PRE AFFINE SYSTEM")
-        print(A)
-
-        print(f"\n\niter: {iterations}")
-        print(f"X:\n{x}")
-        print(f"Y:\n{y}")
-        print(f"S:\n{s}")
-        print(f"delta X:\n{delta_x_aff}")
-        print(f"delta S:\n{delta_s_aff}")
-        print(f"rhs:\n{b}")
-
+        # print("PRE AFFINE SYSTEM")
+        # print(f"\n\niter: {iterations}")
+        # print(f"X:\n{x}")
+        # print(f"Y:\n{y}")
+        # print(f"S:\n{s}")
+        # print(f"delta X:\n{delta_x_aff}")
+        # print(f"delta S:\n{delta_s_aff}")
+        
         # affine step length, definition 14.32 at page 408(427)
         alpha_max_p = min([-xi / delta_xi for xi, delta_xi in zip(x, delta_x_aff) if delta_xi < 0.0])
         alpha_max_d = min([-si / delta_si for si, delta_si in zip(s, delta_s_aff) if delta_si < 0.0])
@@ -152,33 +139,27 @@ def mehrotra_linopt_dense(mat: numpy.array,
         # corrector step or centering parameter
         sigma = (mu_aff / mu) ** 3
 
-        print(f"\n\niter: {iterations}")
-        print(f"sigma: {sigma}, mu aff: {mu_aff}\n")
-        print(f"buff X:\n{x + alpha_aff_p * delta_x_aff}")
-        print(f"buff S:\n{s + alpha_aff_d * delta_s_aff}")
+        # print(f"\n\niter: {iterations}")
+        # print(f"sigma: {sigma}, mu aff: {mu_aff}\n")
+        # print(f"buff X:\n{x + alpha_aff_p * delta_x_aff}")
+        # print(f"buff S:\n{s + alpha_aff_d * delta_s_aff}")
 
         DELTA_X_aff = numpy.diag(delta_x_aff)
         DELTA_S_aff = numpy.diag(delta_s_aff)
         r_xs = r_xs + DELTA_X_aff.dot(DELTA_S_aff).dot(numpy.ones(n)) - sigma * mu
 
-        delta_y = numpy.linalg.solve(ADA, -r_b - mat.dot(D).dot(r_c) + mat.dot(S_inv.dot(r_xs)))
+        vec1 = s_inv * r_xs
+        delta_y = numpy.linalg.solve(ADA, -r_b - mat.dot(D).dot(r_c) + mat.dot(vec1))
         delta_s = -r_c - mat.T.dot(delta_y)
-        delta_x = -S_inv.dot(r_xs) - D.dot(delta_s)
+        delta_x = -vec1 - D.dot(delta_s)
 
-        b = numpy.hstack((-r_c, -r_b, -r_xs))
-        #sol = numpy.linalg.solve(A, b)
-        #delta_x = sol[:n]
-        #delta_y = sol[n:n+m]
-        #delta_s = sol[n+m:]
-
-        print(f"\n\n{iterations:4d}) AFTER CORRECTION SYSTEM")
-        print(f"X:\n{x}")
-        print(f"Y:\n{y}")
-        print(f"S:\n{s}")
-        print(f"delta X:\n{delta_x}")
-        print(f"delta S:\n{delta_s}")
-        print(f"rhs:\n{b}")
-
+        # print(f"\n\n{iterations:4d}) AFTER CORRECTION SYSTEM")
+        # print(f"X:\n{x}")
+        # print(f"Y:\n{y}")
+        # print(f"S:\n{s}")
+        # print(f"delta X:\n{delta_x}")
+        # print(f"delta S:\n{delta_s}")
+        
         alpha_max_p = min([-xi / delta_xi for xi, delta_xi in zip(x, delta_x) if delta_xi < 0.0])
         alpha_max_d = min([-si / delta_si for si, delta_si in zip(s, delta_s) if delta_si < 0.0])
         alpha_p = min(1.0, eta * alpha_max_p)
@@ -199,14 +180,14 @@ def mehrotra_linopt_dense(mat: numpy.array,
 
         mu = x.dot(s) / float(n)
 
-        print(f"\n\n{iterations:4d}) LOOP END")
-        print(f"mu: {mu}, al prim: {alpha_p}, al dual: {alpha_d}")
-        print(f"X:\n{x}")
-        print(f"Y:\n{y}")
-        print(f"S:\n{s}")
-        print(f"delta X:\n{delta_x}")
-        print(f"delta S:\n{delta_s}")
-        print(f"rhs:\n{b}")
+        # print(f"\n\n{iterations:4d}) LOOP END")
+        # print(f"mu: {mu}, al prim: {alpha_p}, al dual: {alpha_d}")
+        # print(f"X:\n{x}")
+        # print(f"Y:\n{y}")
+        # print(f"S:\n{s}")
+        # print(f"delta X:\n{delta_x}")
+        # print(f"delta S:\n{delta_s}")
+        # print(f"rhs:\n{b}")
 
         iterations += 1
 
@@ -317,11 +298,11 @@ def mehrotra_linopt_dense_test(mat: numpy.array,
         delta_y = sol[n:n+m]
         delta_s = sol[n+m:]
 
-        print(f"\n{iterations:4d}) AFTER CORRECTION SYSTEM")
-        print(f"sol:")
-        print_vec(sol)
-        print(f"rhs:")
-        print_vec(b)
+        #print(f"\n{iterations:4d}) AFTER CORRECTION SYSTEM")
+        #print(f"sol:")
+        #print_vec(sol)
+        #print(f"rhs:")
+        #print_vec(b)
 
         alpha_max_p = min(
             [-xi / delta_xi for xi, delta_xi in zip(x, delta_x) if delta_xi < 0.0])
@@ -346,9 +327,8 @@ def mehrotra_linopt_dense_test(mat: numpy.array,
 
         mu = x.dot(s) / float(n)
 
-        print(f"\n{iterations:4d}) UPDATE STEP")
-        print(
-            f"mu: {mu:8.6f}, al prim: {alpha_p:8.6f}, al max prim: {alpha_max_p:8.6f}, al dual: {alpha_d:8.6f}, al max dual: {alpha_max_d:8.6f}")
+        #print(f"\n{iterations:4d}) UPDATE STEP")
+        #print(f"mu: {mu:8.6f}, al prim: {alpha_p:8.6f}, al max prim: {alpha_max_p:8.6f}, al dual: {alpha_d:8.6f}, al max dual: {alpha_max_d:8.6f}")
 
 
         # print(f"\n\n{iterations:4d}) LOOP END")

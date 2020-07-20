@@ -1,6 +1,7 @@
 /.vscode/
 /bin/
 /python/__pycache__/
+/python/cplex_solver.py
 /papers/CU*
 /papers/cuda_11/
 sypha

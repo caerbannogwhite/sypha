@@ -10,12 +10,16 @@
 #include <time.h>
 #include <string>
 #include <vector>
+#include <sys/time.h>
+#include <ctime>
 
 #include "sypha_cuda_helper.h"
 #include <cuda_runtime.h>
+#include <cuda_runtime_api.h>
+#include <cusparse.h>
 
 #include "cusparse.h"
-#include "cusolverSp.h"
+#include <cusolverSp.h>
 
 using namespace std;
 namespace po = boost::program_options;
@@ -23,7 +27,7 @@ namespace po = boost::program_options;
 enum SyphaStatus
 {
     CODE_SUCCESFULL,
-    CODE_ERROR,
+    CODE_GENERIC_ERROR,
     CODE_MODEL_TYPE_NOT_FOUND,
 };
 

@@ -8,9 +8,16 @@ SyphaEnvironment::SyphaEnvironment() {
 
 SyphaEnvironment::SyphaEnvironment(int argc, char *argv[])
 {
-    this->setDefaultParameters();
-    this->readInputArguments(argc, argv);
-    this->setUpDevice();
+    this->internalStatus = CODE_SUCCESFULL;
+    this->internalStatus = this->setDefaultParameters();
+    if (this->internalStatus == CODE_SUCCESFULL)
+    {
+        this->internalStatus = this->readInputArguments(argc, argv);
+        if (this->internalStatus == CODE_SUCCESFULL)
+        {
+            this->internalStatus = this->setUpDevice();
+        }
+    }
 }
 
 SyphaStatus SyphaEnvironment::setDefaultParameters() {
@@ -42,6 +49,7 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         desc.add_options()
         ("help", "produce help message")
         ("unit-tests", po::value<string>(&this->test)->default_value("none"), "launch unit tests")
+        ("unit-tests-rep", po::value<int>(&this->testRepeat)->default_value(1), "set number of repeats for each test")
         ("input-file", po::value<string>(&this->inputFilePath), "set input file path")
         ("model", po::value<string>(&modelType), "set input model type (scp)")
         ("sparse", po::value<bool>(&this->sparse)->default_value(true), "import model as sparse model")
@@ -59,12 +67,7 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         if (vm.count("help"))
         {
             cout << desc << "\n";
-            return CODE_ERROR;
-        }
-
-        if (vm.count("unit-tests"))
-        {
-            cout << "Launch unit tests " << vm["unit-tests"].as<string>() << ".\n";
+            return CODE_GENERIC_ERROR;
         }
 
         if (vm.count("input-file"))
@@ -74,7 +77,7 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         else
         {
             cout << "Input file path not set. Exiting.\n";
-            return CODE_ERROR;
+            return CODE_GENERIC_ERROR;
         }
         if (vm.count("model"))
         {
@@ -83,14 +86,14 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
                 this->modelType = MODEL_TYPE_SCP;
             } else {
                 cout << "Input model type not set. Exiting.\n";
-                return CODE_ERROR;
+                return CODE_GENERIC_ERROR;
             }
             cout << "Input model type set to " << vm["model"].as<string>() << ".\n";
         }
         else
         {
             cout << "Input model type not set. Exiting.\n";
-            return CODE_ERROR;
+            return CODE_GENERIC_ERROR;
         }
         if (vm.count("timeLimit"))
         {
@@ -116,12 +119,12 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
     catch (exception &e)
     {
         cerr << "error: " << e.what() << "\n";
-        return CODE_ERROR;
+        return CODE_GENERIC_ERROR;
     }
     catch (...)
     {
         cerr << "Exception of unknown type!\n";
-        return CODE_ERROR;
+        return CODE_GENERIC_ERROR;
     }
 
     return CODE_SUCCESFULL;
@@ -149,7 +152,25 @@ void SyphaEnvironment::logger(string message, string type, int level)
     }
 }
 
+int SyphaEnvironment::getVerbosityLevel()
+{
+    return this->verbosityLevel;
+}
+
 std::string SyphaEnvironment::getTest()
 {
     return this->test;
+}
+
+SyphaStatus SyphaEnvironment::getStatus()
+{
+    return this->internalStatus;
+}
+
+double SyphaEnvironment::timer()
+{
+    struct timeval timerStop, timerElapsed;
+    gettimeofday(&timerElapsed, NULL);
+    //timersub(&timerStop, &timerStart, &timerElapsed);
+    return timerElapsed.tv_sec * 1000.0 + timerElapsed.tv_usec / 1000.0;
 }

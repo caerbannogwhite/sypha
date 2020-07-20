@@ -37,7 +37,7 @@ double SyphaNodeDense::getObjval()
 
 SyphaStatus SyphaNodeDense::solve()
 {
-    solver_dense_merhrotra(*this);
+    solver_dense_mehrotra(*this);
 
     return CODE_SUCCESFULL;
 }

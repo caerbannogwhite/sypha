@@ -50,8 +50,8 @@ public:
     SyphaStatus setUpCuda();
 
     friend SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputFilePath);
-    friend SyphaStatus solver_dense_merhrotra(SyphaNodeDense &node);
-    friend SyphaStatus solver_dense_merhrotra_init(SyphaNodeDense &node);
+    friend SyphaStatus solver_dense_mehrotra(SyphaNodeDense &node);
+    friend SyphaStatus solver_dense_mehrotra_init(SyphaNodeDense &node);
 };
 
 #endif // SYPHA_NODE_DENSE_H
