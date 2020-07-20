@@ -34,5 +34,7 @@ Total number of non-zero elements is *`A.nnz` * 2 + n * 3*.
 
 ## ISSUES ##
 
-* SYPHA-0001: (sypha_node_sparse) change X, S matrix update phase on `solver_sparse_merhrotra` using cublas copy
-* SYPHA-0002: (sypha_node_sparse) update the procedure to find `alphaMaxPrim` and `alphaMaxDual` on `solver_sparse_merhrotra` using device kernels
+* SYPHA-1: (sypha_node_sparse) change X, S matrix update phase on `solver_sparse_merhrotra` using cublas copy
+* SYPHA-2: (sypha_node_sparse) update the procedure to find `alphaMaxPrim` and `alphaMaxDual` on `solver_sparse_merhrotra` using device kernels
+* SYPHA-3: (sypha_node_sparse) substitute solving procedure using 
+
