@@ -8,8 +8,59 @@ from statistics import mean, stdev
 from argparse import ArgumentParser
 
 ACCEPT_TOL = 1.E-4
-#BASE_DIR = "/home/macs/coding/optimization/sypha"
-BASE_DIR = "/home/ubuntu/sypha"
+BASE_DIR = "/home/macs/coding/optimization/sypha"
+#BASE_DIR = "/home/ubuntu/sypha"
+
+class Entry(object):
+
+    HEADER = [
+        "INST",
+        "ITER MEAN",
+        "SOLVER TIME MEAN (s)",
+        "SOLVER TIME STD",
+        "TOTAL TIME MEAN (s)",
+        "TOTAL TIME STD",
+        "REP",
+        "PASS",
+        "FAIL",
+    ]
+
+    def __init__(self, instance, repeat):
+        self.instance = instance
+        self.repeat = repeat
+        self.passed = 0
+        self.failed = 0
+        self.iterations_vals = []
+        self.start_sol_time_vals = []
+        self.pre_sol_time_vals = []
+        self.solver_time_vals = []
+        self.total_time_vals = []
+
+    @staticmethod
+    def get_csv_header(sep=","):
+        return sep.join(Entry.HEADER) + "\n"
+        
+    def to_csv(self, sep=","):
+        vals = [
+            self.instance,
+            mean(self.iterations_vals),
+            # mean(self.start_sol_time_vals),
+            # 0.0 if len(self.start_sol_time_vals) < 2 else stdev(self.start_sol_time_vals),
+            # mean(self.pre_sol_time_vals),
+            # 0.0 if len(self.pre_sol_time_vals) < 2 else stdev(self.pre_sol_time_vals),
+            mean(self.solver_time_vals),
+            0.0 if len(self.solver_time_vals) < 2 else stdev(self.solver_time_vals),
+            mean(self.total_time_vals),
+            0.0 if len(self.total_time_vals) < 2 else stdev(self.total_time_vals),
+            self.repeat,
+            self.passed,
+            self.failed,
+        ]
+        return sep.join(map(str, vals)) + "\n"
+
+    def __repr__(self):
+        return ""
+
 
 SCP4_STRINGS = [f"scp4{i+1:d}" for i in range(10)]
 SCP5_STRINGS = [f"scp5{i+1:d}" for i in range(10)]
@@ -17,7 +68,6 @@ SCPNRE_STRINGS = [f"scpnre{i+1:d}" for i in range(5)]
 SCPNRF_STRINGS = [f"scpnrf{i+1:d}" for i in range(5)]
 SCPNRG_STRINGS = [f"scpnrg{i+1:d}" for i in range(5)]
 SCPNRH_STRINGS = [f"scpnrh{i+1:d}" for i in range(5)]
-
 
 SCP4_SOLUTIONS = [
     429.00000000000000000000,
@@ -77,17 +127,9 @@ SCPNRH_SOLUTIONS = [
     42.37035886823193209239
 ]
 
-
 def exec_sypha(inst, solution, repeat):
-    data = dict()
     
-    pass_cnt = 0
-    fail_cnt = 0
-    iterations = []
-    start_sol_times = []
-    pre_sol_times = []
-    solver_times = []
-    total_times = []
+    entry = Entry(inst, repeat)
 
     for i in range(repeat):
         log_file_name = f"{inst}_test_{i}_{datetime.now().strftime('%Y%m%d_%H%M')}.log"
@@ -106,90 +148,65 @@ def exec_sypha(inst, solution, repeat):
                 accept_dual = abs(float(dual) - solution) < ACCEPT_TOL
             elif "ITERATIONS" in row:
                 p, val = row.split(":")
-                iterations.append(int(val))
+                entry.iterations_vals.append(int(val))
             elif "TIME START SOL" in row:
                 p, val = row.split(":")
-                start_sol_times.append(float(val) / 1000)
+                entry.start_sol_time_vals.append(float(val) / 1000)
             elif "TIME PRE SOL" in row:
                 p, val = row.split(":")
-                pre_sol_times.append(float(val) / 1000)
+                entry.pre_sol_time_vals.append(float(val) / 1000)
             elif "TIME SOLVER" in row:
                 p, val = row.split(":")
-                solver_times.append(float(val) / 1000)
+                entry.solver_time_vals.append(float(val) / 1000)
             elif "TIME TOTAL" in row:
                 p, val = row.split(":")
-                total_times.append(float(val) / 1000)
+                entry.total_time_vals.append(float(val) / 1000)
 
         if accept_prim and accept_dual:
-            pass_cnt += 1
+            entry.passed += 1
         else:
-            fail_cnt += 1
+            entry.failed += 1
 
         file_handler.close()
-    
-    data["inst"] = inst
-    data["pass"] = pass_cnt
-    data["fail"] = fail_cnt
-    data["repeat"] = repeat
-    data["iterations_mean"] = mean(iterations)
-    data["start_sol_time_mean"] = mean(start_sol_times)
-    data["start_sol_time_std"] = 0.0 if len(start_sol_times) < 2 else stdev(start_sol_times)
-    data["pre_sol_time_mean"] = mean(pre_sol_times)
-    data["pre_sol_time_std"] = 0.0 if len(pre_sol_times) < 2 else stdev(pre_sol_times)
-    data["solver_time_mean"] = mean(solver_times)
-    data["solver_time_std"] = 0.0 if len(solver_times) < 2 else stdev(solver_times)
-    data["total_time_mean"] = mean(total_times)
-    data["total_time_std"] = 0.0 if len(total_times) < 2 else stdev(total_times)
 
-    return data
-
+    return entry
 
 
 def launch_tests(match, repeat):
     log_file = open(f"result_{datetime.now().strftime('%Y%m%d_%H%M')}.csv", "w")
 
     # header
-    log_file.write(",".join([
-        "INST",
-        "ITER MEAN",
-        "SOLVER TIME MEAN (s)",
-        "SOLVER TIME STD",
-        "TOTAL TIME MEAN (s)",
-        "TOTAL TIME STD",
-        "REP",
-        "PASS",
-        "FAIL",
-    ]) + "\n")
+    log_file.write(Entry.get_csv_header())
 
     for i, instance in enumerate(SCP4_STRINGS):
         if re.match(match, instance):
-            res = exec_sypha(instance, SCP4_SOLUTIONS[i], repeat)
-            log_file.write(",".join(map(str, [
-                res["inst"],
-                res["iterations_mean"],
-                res["solver_time_mean"],
-                res["solver_time_std"],
-                res["total_time_mean"],
-                res["total_time_std"],
-                res["repeat"],
-                res["pass"],
-                res["fail"]
-            ])) + "\n")
+            entry = exec_sypha(instance, SCP4_SOLUTIONS[i], repeat)
+            log_file.write(entry.to_csv())
 
     for i, instance in enumerate(SCP5_STRINGS):
         if re.match(match, instance):
-            res = exec_sypha(instance, SCP5_SOLUTIONS[i], repeat)
-            log_file.write(",".join(map(str, [
-                res["inst"],
-                res["iterations_mean"],
-                res["solver_time_mean"],
-                res["solver_time_std"],
-                res["total_time_mean"],
-                res["total_time_std"],
-                res["repeat"],
-                res["pass"],
-                res["fail"]
-            ])) + "\n")
+            entry = exec_sypha(instance, SCP5_SOLUTIONS[i], repeat)
+            log_file.write(entry.to_csv())
+
+    for i, instance in enumerate(SCPNRE_STRINGS):
+        if re.match(match, instance):
+            entry = exec_sypha(instance, SCPNRE_SOLUTIONS[i], repeat)
+            log_file.write(entry.to_csv())
+
+    for i, instance in enumerate(SCPNRF_STRINGS):
+        if re.match(match, instance):
+            entry = exec_sypha(instance, SCPNRF_SOLUTIONS[i], repeat)
+            log_file.write(entry.to_csv())
+
+    for i, instance in enumerate(SCPNRG_STRINGS):
+        if re.match(match, instance):
+            entry = exec_sypha(instance, SCPNRG_SOLUTIONS[i], repeat)
+            log_file.write(entry.to_csv())
+
+    for i, instance in enumerate(SCPNRH_STRINGS):
+        if re.match(match, instance):
+            entry = exec_sypha(instance, SCPNRH_SOLUTIONS[i], repeat)
+            log_file.write(entry.to_csv())
 
     log_file.close()
 

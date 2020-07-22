@@ -3,6 +3,7 @@ import argparse
 import numpy
 import re
 import os
+import time
 
 from numpy.linalg import LinAlgError
 from itertools import product
@@ -23,20 +24,52 @@ def launch(instance, solver):
             if re.match(instance, name):
 
                 try:
-                    if solver == "dense" or solver == "dense_test":
+                    if solver == "dense":
                         mat, rhs, obj = sc_dense_model_reader(BASE_DIR + entry)
                         mat, rhs, obj = sc_dense_to_standard_form(mat, rhs, obj)
 
-                        if solver == "dense":
-                            x, y, s, iterations = mehrotra_linopt_dense(mat, rhs, obj)
-                        else:
-                            x, y, s, iterations = mehrotra_linopt_dense_test(mat, rhs, obj)                        
+                        time_start = time.perf_counter()
+                        x, y, s, iterations = mehrotra_linopt_dense(mat, rhs, obj)
+                        time_delta = time.perf_counter() - time_start
+
+                    elif  solver == "dense_test":
+                        mat, rhs, obj = sc_dense_model_reader(BASE_DIR + entry)
+                        mat, rhs, obj = sc_dense_to_standard_form(mat, rhs, obj)
+
+                        time_start = time.perf_counter()
+                        x, y, s, iterations = mehrotra_linopt_dense_test(mat, rhs, obj)
+                        time_delta = time.perf_counter() - time_start
+
+                    elif solver == "dense_test_2":
+                        mat, rhs, obj = sc_dense_model_reader(BASE_DIR + entry)
+                        mat, rhs, obj = sc_dense_to_standard_form(
+                            mat, rhs, obj)
+
+                        time_start = time.perf_counter()
+                        x, y, s, iterations = mehrotra_linopt_dense_test_2(
+                            mat, rhs, obj)
+                        time_delta = time.perf_counter() - time_start
+
+                    elif solver == "alm_test":
+                        mat, rhs, obj = sc_dense_model_reader(BASE_DIR + entry)
+                        mat, rhs, obj = sc_dense_to_standard_form(mat, rhs, obj)
+                        
+                        m, n = mat.shape
+                        lb = numpy.zeros(n)
+                        ub = numpy.ones(n)
+                        ub[n-m:] = numpy.inf
+
+                        time_start = time.perf_counter()
+                        x, y, s, iterations = alm_test(mat, rhs, obj, lb, ub)
+                        time_delta = time.perf_counter() - time_start
 
                     elif  solver == "sparse":
                         mat, rhs, obj = sc_sparse_model_reader(BASE_DIR + entry)
                         mat, rhs, obj = sc_sparse_to_standard_form(mat, rhs, obj)
 
+                        time_start = time.perf_counter()
                         x, y, s, iterations = mehrotra_linopt_sparse(mat, rhs, obj)
+                        time_delta = time.perf_counter() - time_start
 
                     else:
                         print("Solver not found")
@@ -48,7 +81,7 @@ def launch(instance, solver):
                     if numpy.isclose(upp, low, 1E-6):
                         flag = True
 
-                    print(f"{name:15s} ({m:5d},{n:5d}) | {upp:16.6f} | {low:16.6f} | {iterations:4d}")
+                    print(f"{name:15s} ({m:5d},{n:5d}) | {upp:16.6f} | {low:16.6f} | {iterations:4d} | {time_delta:10.4f}")
                     del x, y, s
 
                 except numpy.linalg.LinAlgError:
