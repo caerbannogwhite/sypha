@@ -36,6 +36,22 @@ Total number of non-zero elements is *`A.nnz` * 2 + n * 3*.
 
 ## SETTING UP ##
 
+### Option A: Docker (recommended on Windows) ###
+
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and enable WSL2
+2. Install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) for GPU passthrough
+3. Build and run:
+   ```bash
+   docker compose build
+   docker compose run sypha
+   ```
+   Or with a specific data file:
+   ```bash
+   docker compose run sypha ./sypha --verbosity 100 --model SCP --input-file data/scp_demo00.txt
+   ```
+
+### Option B: Linux native build ###
+
 * Install gsl library
 `sudo apt-get install libgsl-dev`
 
@@ -48,3 +64,11 @@ for instance, to get cuda 11.0 just run
 `sudo sh cuda_11.0.1_450.36.06_linux.run`
 
 (see Nvidia resources...)
+
+* Build and run:
+`make`
+`./sypha --verbosity 100 --model SCP --input-file data/demo00.txt`
+
+### Windows native build ###
+
+The Makefile and source use POSIX APIs (`gettimeofday`, `unistd.h`) and are designed for Linux. To build on Windows, use the Docker option above, or WSL2 with Ubuntu to run the Linux build natively.

@@ -1,6 +1,19 @@
 
 #include "sypha_solver_sparse.h"
 
+// CUDA 12+ cuSPARSE: legacy enums removed; use generic API enums
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
+#ifndef CUSPARSE_CSRMV_ALG2
+#define CUSPARSE_CSRMV_ALG2 CUSPARSE_SPMV_CSR_ALG2
+#endif
+#ifndef CUSPARSE_CSR2CSC_ALG2
+#define CUSPARSE_CSR2CSC_ALG2 CUSPARSE_CSR2CSC_ALG1
+#endif
+#ifndef CUSPARSE_CSRMM_ALG1
+#define CUSPARSE_CSRMM_ALG1 CUSPARSE_SPMM_ALG_DEFAULT
+#endif
+#endif
+
 SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
 {
     const int reorder = 0;
@@ -715,6 +728,7 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
     return CODE_SUCCESFULL;
 }
 
+#if !(defined(CUDART_VERSION) && CUDART_VERSION >= 12000)
 SyphaStatus solver_sparse_mehrotra_init_1(SyphaNodeSparse &node)
 {
     const int reorder = 0;
@@ -895,6 +909,16 @@ SyphaStatus solver_sparse_mehrotra_init_1(SyphaNodeSparse &node)
 
     return CODE_SUCCESFULL;
 }
+#endif // !(CUDA 12+)
+
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
+// CUDA 12+: legacy csrmvEx / CUSPARSE_ALG_MERGE_PATH are unavailable.
+// Reuse the GSL-based initialisation instead of the legacy cuSPARSE path.
+SyphaStatus solver_sparse_mehrotra_init_1(SyphaNodeSparse &node)
+{
+    return solver_sparse_mehrotra_init_gsl(node);
+}
+#endif
 
 SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node)
 {
@@ -951,15 +975,11 @@ SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node)
 
     ///////////////////             STORE MATRIX IN DENSE FORMAT
     node.env->logger("solver_sparse_mehrotra_init - storing matrix in dense format", "INFO", 20);
-    checkCudaErrors(cusparseDcsr2dense(node.cusparseHandle, node.nrows, node.ncols,
-                                       matDescrGen, // CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO
-                                       node.d_csrMatVals, node.d_csrMatOffs, node.d_csrMatInds,
-                                       d_matDn, node.nrows));
-
-    ///////////////////             COMPUTE AAT INVERSE MATRIX
-
-    // GEMM Computation: MATRIX * MATRIX'
-    node.env->logger("solver_sparse_mehrotra_init - computing mat * mat'", "INFO", 20);
+    size_t szSparseToDense = 0;
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
+    checkCudaErrors(cusparseSparseToDense_bufferSize(node.cusparseHandle, node.matDescr, matDnDescr,
+                                                     CUSPARSE_SPARSETODENSE_ALG_DEFAULT, &szSparseToDense));
+#endif
     checkCudaErrors(cusparseSpMM_bufferSize(node.cusparseHandle,
                                             CUSPARSE_OPERATION_NON_TRANSPOSE,
                                             CUSPARSE_OPERATION_TRANSPOSE,
@@ -971,7 +991,23 @@ SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node)
 
     // allocate memory for computation
     currBufferSize = bufferSize > I_matBytes ? bufferSize : I_matBytes;
+    if (szSparseToDense > currBufferSize) currBufferSize = szSparseToDense;
     checkCudaErrors(cudaMalloc((void **)&d_buffer, currBufferSize));
+
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
+    checkCudaErrors(cusparseSparseToDense(node.cusparseHandle, node.matDescr, matDnDescr,
+                                           CUSPARSE_SPARSETODENSE_ALG_DEFAULT, d_buffer));
+#else
+    checkCudaErrors(cusparseDcsr2dense(node.cusparseHandle, node.nrows, node.ncols,
+                                       matDescrGen,
+                                       node.d_csrMatVals, node.d_csrMatOffs, node.d_csrMatInds,
+                                       d_matDn, node.nrows));
+#endif
+
+    ///////////////////             COMPUTE AAT INVERSE MATRIX
+
+    // GEMM Computation: MATRIX * MATRIX'
+    node.env->logger("solver_sparse_mehrotra_init - computing mat * mat'", "INFO", 20);
 
     checkCudaErrors(cusparseSpMM(node.cusparseHandle,
                                  CUSPARSE_OPERATION_NON_TRANSPOSE,

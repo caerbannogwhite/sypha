@@ -151,7 +151,10 @@ endif
 
 NVCCFLAGS += -g -G -O3 -use_fast_math
 
+# Include path: -Isrc for standalone; override with INCLUDES=... if needed
+INCLUDES ?= -Isrc
 ALL_CCFLAGS :=
+ALL_CCFLAGS += $(INCLUDES)
 ALL_CCFLAGS += $(NVCCFLAGS)
 ALL_CCFLAGS += $(EXTRA_NVCCFLAGS)
 ALL_CCFLAGS += $(addprefix -Xcompiler ,$(CCFLAGS))
@@ -168,14 +171,11 @@ ALL_LDFLAGS += $(ALL_CCFLAGS)
 ALL_LDFLAGS += $(addprefix -Xlinker ,$(LDFLAGS))
 ALL_LDFLAGS += $(addprefix -Xlinker ,$(EXTRA_LDFLAGS))
 
-# Common includes and paths for CUDA
-INCLUDES  := -I../../common/inc
-LIBRARIES :=
-
 ################################################################################
 
 # Gencode arguments
-SMS ?= 30 35 37 50 52 60 61 70 75
+# CUDA 12+ dropped support for compute_30/35/37 (Fermi/Kepler). Use 50+ only.
+SMS ?= 50 52 60 61 70 75 80 86 89 90
 
 ifeq ($(SMS),)
 $(info >>> WARNING - no SM architectures have been specified - waiving sample <<<)
@@ -193,6 +193,7 @@ GENCODE_FLAGS += -gencode arch=compute_$(HIGHEST_SM),code=compute_$(HIGHEST_SM)
 endif
 endif
 
+LIBRARIES :=
 LIBRARIES += -lcusolver -lcublas -lcusparse
 
 ifeq ($(SAMPLE_ENABLED),0)
@@ -201,11 +202,16 @@ endif
 
 ###########################			BOOST 		###############################
 
-BOOST=/usr/local/boost_1_71_0
+# BOOST: use /usr for system Boost (apt install libboost-all-dev), or path to custom build
+BOOST ?= /usr
+# Use system Boost (no -L needed) when BOOST is /usr
+ifeq ($(BOOST),/usr)
+LIBRARIES += -lgsl -lgslcblas -lm -lpthread -ldl -lboost_program_options
+else
 LIBRARIES += -lgsl -lgslcblas -lm -lpthread -ldl
-LIBRARIES += -L$(BOOST)/stage/lib -lboost_program_options
-LIBRARIES += -L$(CUDA)/lib64 -L$(CUDA)/targets/x86_64-linux/lib
-LIBRARIES += -I$(BOOST)
+LIBRARIES += -L$(BOOST)/stage/lib -lboost_program_options -I$(BOOST)
+endif
+LIBRARIES += -L$(CUDA_PATH)/lib64 -L$(CUDA_PATH)/targets/x86_64-linux/lib
 
 ################################################################################
 
