@@ -1,6 +1,6 @@
 # Sypha - Interior Point Optimization on GPU with CUDA
-# Uses NVIDIA CUDA development image for Linux build
-FROM nvidia/cuda:12.0.0-devel-ubuntu22.04
+# Uses NVIDIA CUDA development image for Linux build (current, non-deprecated tag)
+FROM nvidia/cuda:12.9.1-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
