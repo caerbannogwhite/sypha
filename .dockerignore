@@ -1,0 +1,9 @@
+.git
+.gitignore
+*.o
+bin/
+sypha
+python/
+*.md
+.vscode
+.idea

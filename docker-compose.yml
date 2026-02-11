@@ -1,0 +1,16 @@
+# Sypha - Interior Point Optimization on GPU
+# Requires: Docker Desktop + NVIDIA Container Toolkit (for GPU passthrough)
+# On Windows: Install NVIDIA drivers, Docker Desktop with WSL2, then nvidia-docker
+services:
+  sypha:
+    build: .
+    # GPU access - requires nvidia-container-toolkit
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # Run demo by default; override with: docker compose run sypha ./sypha --input-file data/scp_demo00.txt
+    command: ["./sypha", "--verbosity", "100", "--model", "SCP", "--input-file", "data/demo00.txt"]
