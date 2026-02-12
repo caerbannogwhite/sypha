@@ -253,9 +253,8 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
     while ((iterations < node.env->MEHROTRA_MAX_ITER) && (mu > node.env->MEHROTRA_MU_TOL))
     {
 
-        // x, s multiplication and res XS update: to improve
-        // elem_min_mult_hybr(d_x, d_s, d_resXS, node.ncols);
-        elem_min_mult_host(d_x, d_s, d_resXS, node.ncols);
+        // x, s multiplication: -x.*s on device (was host + 3 full-vector PCIe transfers)
+        elem_min_mult_dev(d_x, d_s, d_resXS, node.ncols);
 
         checkCudaErrors(cusolverSpDcsrlsvqr(node.cusolverSpHandle,
                                             A_nrows, A_nnz, A_descr,
@@ -314,14 +313,8 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
         // corrector step or centering parameter
         sigma = gsl_pow_3(muAff / mu);
 
-        // x, s multiplication and res XS update: to improve
-        for (j = 0; j < node.ncols; ++j)
-        {
-            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_deltaX[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            checkCudaErrors(cudaMemcpyAsync(&beta, &d_deltaS[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            alpha = -(alpha * beta) + sigma * mu;
-            checkCudaErrors(cudaMemcpyAsync(&d_bufferX[j], &alpha, sizeof(double), cudaMemcpyHostToDevice, node.cudaStream));
-        }
+        // d_bufferX = -deltaX.*deltaS + sigma*mu (on device)
+        corrector_rhs_dev(d_deltaX, d_deltaS, sigma, mu, d_bufferX, node.ncols);
 
         alpha = 1.0;
         checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
