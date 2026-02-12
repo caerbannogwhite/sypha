@@ -1,0 +1,21 @@
+# Docker Compose for OR-Tools SCP Benchmark
+version: "3.8"
+
+services:
+  benchmark:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ../data:/data:ro
+      - ./results:/results
+    command: ["--data-dir", "/data", "--output", "/results/benchmark_results.csv"]
+
+  benchmark-with-integer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ../data:/data:ro
+      - ./results:/results
+    command: ["--data-dir", "/data", "--output", "/results/benchmark_results_with_ip.csv", "--solve-integer", "--time-limit", "300"]
