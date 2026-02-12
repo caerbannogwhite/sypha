@@ -1,4 +1,5 @@
-
+#include <algorithm>
+#include <cctype>
 #include "sypha_environment.h"
 #include "sypha_cuda_helper.h"
 
@@ -71,7 +72,11 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         }
         if (vm.count("model"))
         {
-            if (vm["model"].as<string>() == "scp")
+            string modelStr = vm["model"].as<string>();
+            std::transform(modelStr.begin(), modelStr.end(), modelStr.begin(),
+                           [](unsigned char c)
+                           { return std::tolower(c); });
+            if (modelStr == "scp")
             {
                 this->modelType = MODEL_TYPE_SCP;
             }

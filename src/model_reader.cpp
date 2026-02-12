@@ -73,7 +73,7 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
     node.nnz = nnz;
     node.ncolsOriginal = node.ncols; // Save original column count before adding slacks
     node.ncols = ncolsAS;
-    sprintf(message, "Successfully read SCP model (dense) with %d non zeros", (nnz - node.nrows));
+    sprintf(message, "Model: SCP (dense), %d non-zeros", (nnz - node.nrows));
     node.env->logger(message, "INFO", 10);
 
     return CODE_SUCCESFULL;
@@ -149,7 +149,7 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
     node.ncolsOriginal = node.ncols; // Save original column count before adding slacks
     node.ncols = node.ncols + node.nrows;
 
-    sprintf(message, "Successfully read SCP model (sparse COO) with %d non zeros", (node.nnz - node.nrows));
+    sprintf(message, "Model: SCP (sparse COO), %d non-zeros", (node.nnz - node.nrows));
     node.env->logger(message, "INFO", 10);
 
     return CODE_SUCCESFULL;
@@ -261,7 +261,7 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
     node.ncolsOriginal = node.ncols; // Save original column count before adding slacks
     node.ncols = node.ncols + node.nrows;
 
-    sprintf(message, "Successfully read SCP model (sparse CSR) with %d non zeros", (node.nnz - node.nrows));
+    sprintf(message, "Model: SCP (sparse CSR), %d non-zeros", (node.nnz - node.nrows));
     node.env->logger(message, "INFO", 10);
 
     return CODE_SUCCESFULL;

@@ -55,19 +55,18 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	sprintf(message, "PRIMAL: %30.20lf", mainNode->getObjvalPrim());
+	env->logger("--- Solution ---", "INFO", 0);
+	sprintf(message, "  Primal:     %.20g", mainNode->getObjvalPrim());
 	env->logger(message, "INFO", 0);
-	sprintf(message, "DUAL: %30.20lf", mainNode->getObjvalDual());
+	sprintf(message, "  Dual:       %.20g", mainNode->getObjvalDual());
 	env->logger(message, "INFO", 0);
-	sprintf(message, "ITERATIONS: %d", mainNode->getIterations());
+	sprintf(message, "  Iterations: %d", mainNode->getIterations());
 	env->logger(message, "INFO", 0);
-	sprintf(message, "TIME START SOL: %15.6lf", mainNode->getTimeStartSol());
-	env->logger(message, "INFO", 0);
-	sprintf(message, "TIME PRE SOL: %15.6lf", mainNode->getTimePreSol());
-	env->logger(message, "INFO", 0);
-	sprintf(message, "TIME SOLVER: %15.6lf", mainNode->getTimeSolver());
-	env->logger(message, "INFO", 0);
-	sprintf(message, "TIME TOTAL:  %15.6lf", (env->timer() - timeStart));
+	sprintf(message, "  Time (s):   start %.3f  pre %.2f  solver %.2f  total %.2f",
+		mainNode->getTimeStartSol() / 1000.0,
+		mainNode->getTimePreSol() / 1000.0,
+		mainNode->getTimeSolver() / 1000.0,
+		(env->timer() - timeStart) / 1000.0);
 	env->logger(message, "INFO", 0);
 
 	return 0;
