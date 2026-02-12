@@ -17,6 +17,7 @@ class SyphaNodeDense
 private:
     int ncols;
     int nrows;
+    int ncolsOriginal;  // Original columns (before adding slack variables)
     int nnz;
     double objval;
     double *h_MatDns;

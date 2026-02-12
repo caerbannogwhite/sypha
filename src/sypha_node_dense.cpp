@@ -78,6 +78,7 @@ SyphaStatus SyphaNodeDense::setInitValues()
 {
     this->ncols = 0;
     this->nrows = 0;
+    this->ncolsOriginal = 0;
     this->nnz = 0;
 
     this->objval = 0.0;

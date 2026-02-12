@@ -17,8 +17,6 @@
 #include <cuda_runtime.h>
 #include <cuda_runtime_api.h>
 #include <cusparse.h>
-
-#include "cusparse.h"
 #include <cusolverSp.h>
 
 using namespace std;
@@ -37,7 +35,6 @@ enum ModelInputType
 };
 
 int utils_printDmat(int m, int n, int l, double *mat, bool device, bool trans);
-int utils_printImat(int m, int n, int l, int *mat, bool device, bool trans);
 int utils_printDvec(int n, double *vec, bool device);
 int utils_printIvec(int n, int *vec, bool device);
 

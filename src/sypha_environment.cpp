@@ -2,8 +2,8 @@
 #include "sypha_environment.h"
 #include "sypha_cuda_helper.h"
 
-SyphaEnvironment::SyphaEnvironment() {
-
+SyphaEnvironment::SyphaEnvironment()
+{
 }
 
 SyphaEnvironment::SyphaEnvironment(int argc, char *argv[])
@@ -20,7 +20,8 @@ SyphaEnvironment::SyphaEnvironment(int argc, char *argv[])
     }
 }
 
-SyphaStatus SyphaEnvironment::setDefaultParameters() {
+SyphaStatus SyphaEnvironment::setDefaultParameters()
+{
 
     this->PX_INFINITY = 1e50;
     this->PX_TOLERANCE = 1e-12;
@@ -31,7 +32,8 @@ SyphaStatus SyphaEnvironment::setDefaultParameters() {
     return CODE_SUCCESFULL;
 }
 
-SyphaStatus SyphaEnvironment::setUpDevice() {
+SyphaStatus SyphaEnvironment::setUpDevice()
+{
 
     this->logger("Setting up device", "INFO", 2);
     this->cudaDeviceId = findCudaDevice(this->cudaDeviceId);
@@ -46,19 +48,7 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
     try
     {
         po::options_description desc("Allowed options");
-        desc.add_options()
-        ("help", "produce help message")
-        ("unit-tests", po::value<string>(&this->test)->default_value("none"), "launch unit tests")
-        ("unit-tests-rep", po::value<int>(&this->testRepeat)->default_value(1), "set number of repeats for each test")
-        ("input-file", po::value<string>(&this->inputFilePath), "set input file path")
-        ("model", po::value<string>(&modelType), "set input model type (scp)")
-        ("sparse", po::value<bool>(&this->sparse)->default_value(true), "import model as sparse model")
-        ("time-limit", po::value<double>(&this->timeLimit), "set time limit")
-        ("seed", po::value<int>(&this->seed), "set random seed")
-        ("thread", po::value<int>(&this->threadNum), "set number of thread")
-        ("tol", po::value<double>(&this->PX_TOLERANCE)->default_value(1e-8), "set tolerance")
-        ("verbosity", po::value<int>(&this->verbosityLevel)->default_value(5), "set verbosity level")
-        ("debug", po::value<int>(&this->DEBUG_LEVEL)->default_value(0), "set debug level");
+        desc.add_options()("help", "produce help message")("unit-tests", po::value<string>(&this->test)->default_value("none"), "launch unit tests")("unit-tests-rep", po::value<int>(&this->testRepeat)->default_value(1), "set number of repeats for each test")("input-file", po::value<string>(&this->inputFilePath), "set input file path")("model", po::value<string>(&modelType), "set input model type (scp)")("sparse", po::value<bool>(&this->sparse)->default_value(true), "import model as sparse model")("time-limit", po::value<double>(&this->timeLimit), "set time limit")("seed", po::value<int>(&this->seed), "set random seed")("thread", po::value<int>(&this->threadNum), "set number of thread")("tol", po::value<double>(&this->PX_TOLERANCE)->default_value(1e-8), "set tolerance")("verbosity", po::value<int>(&this->verbosityLevel)->default_value(5), "set verbosity level")("debug", po::value<int>(&this->DEBUG_LEVEL)->default_value(0), "set debug level");
 
         po::variables_map vm;
         po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -81,11 +71,13 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         }
         if (vm.count("model"))
         {
-            if (vm["model"].as<string>().compare("scp"))
+            if (vm["model"].as<string>() == "scp")
             {
                 this->modelType = MODEL_TYPE_SCP;
-            } else {
-                cout << "Input model type not set. Exiting.\n";
+            }
+            else
+            {
+                cout << "Unsupported model type. Exiting.\n";
                 return CODE_GENERIC_ERROR;
             }
             cout << "Input model type set to " << vm["model"].as<string>() << ".\n";
@@ -95,17 +87,17 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
             cout << "Input model type not set. Exiting.\n";
             return CODE_GENERIC_ERROR;
         }
-        if (vm.count("timeLimit"))
+        if (vm.count("time-limit"))
         {
-            cout << "Time limit set to " << vm["timeLimit"].as<double>() << ".\n";
+            cout << "Time limit set to " << vm["time-limit"].as<double>() << ".\n";
         }
         if (vm.count("seed"))
         {
             cout << "Random seed set to " << vm["seed"].as<int>() << ".\n";
         }
-        if (vm.count("threads"))
+        if (vm.count("thread"))
         {
-            cout << "Number of threads set to " << vm["threads"].as<int>() << ".\n";
+            cout << "Number of threads set to " << vm["thread"].as<int>() << ".\n";
         }
         if (vm.count("tol"))
         {
@@ -132,23 +124,17 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
 
 void SyphaEnvironment::logger(string message, string type, int level)
 {
-    string bold = "\e[1m";
-    string boldEnd = "\e[21m";
-    string colorEnd = "\e[39m";
-    string colorGreen = "\e[32m";
-    string colorRed = "\e[31m";
-    string colorYellow = "\e[33m";
+    const string colorEnd = "\e[39m";
+    const string colorGreen = "\e[32m";
+    const string colorRed = "\e[31m";
 
-    if (type.compare("ERROR") == 0)
+    if (type == "ERROR")
     {
-        cout << bold << colorRed << "[ERROR]" << colorEnd << " " << message << boldEnd << std::endl;
-    } else
-    if (type.compare("INFO") == 0)
+        cout << "\e[1m" << colorRed << "[ERROR]" << colorEnd << " " << message << "\e[21m" << std::endl;
+    }
+    else if (type == "INFO" && level < this->verbosityLevel)
     {
-        if (level < this->verbosityLevel)
-        {
-            cout << colorGreen << "[INFO]" << colorEnd << " " << message << std::endl;
-        }
+        cout << colorGreen << "[INFO]" << colorEnd << " " << message << std::endl;
     }
 }
 
@@ -171,6 +157,6 @@ double SyphaEnvironment::timer()
 {
     struct timeval timerStop, timerElapsed;
     gettimeofday(&timerElapsed, NULL);
-    //timersub(&timerStop, &timerStart, &timerElapsed);
+    // timersub(&timerStop, &timerStart, &timerElapsed);
     return timerElapsed.tv_sec * 1000.0 + timerElapsed.tv_usec / 1000.0;
 }

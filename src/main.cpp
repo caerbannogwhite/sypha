@@ -1,4 +1,4 @@
-﻿
+
 #include "main.h"
 
 int main(int argc, char *argv[])
@@ -36,7 +36,6 @@ int main(int argc, char *argv[])
 	}
 
 	SyphaNodeSparse *mainNode = new SyphaNodeSparse(*env);
-	//SyphaNodeDense *mainNode = new SyphaNodeDense(*env);
 
 	env->logger("Environment initialised", "INFO", 5);
 	double timeStart = env->timer();

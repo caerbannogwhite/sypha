@@ -27,6 +27,7 @@ class SyphaNodeSparse
 private:
     int ncols;
     int nrows;
+    int ncolsOriginal;  // Original columns (before adding slack variables)
     int nnz;
     double objvalPrim;
     double objvalDual;
