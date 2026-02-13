@@ -21,7 +21,7 @@ private:
     string inputFilePath;
     ModelInputType modelType;
     bool sparse;
-    
+
     int seed;
     int threadNum;
     int cudaDeviceId;
@@ -38,6 +38,7 @@ private:
     double MEHROTRA_ETA = 0.95;
     double MEHROTRA_MU_TOL = 1.E-4;
     double MEHROTRA_CHOL_TOL = 1.E-8;
+    int MEHROTRA_REORDER = 1; /* 0 = no reorder, 1 = fill-reducing reorder for sparse QR */
 
 public:
     SyphaEnvironment();

@@ -87,6 +87,20 @@ void corrector_rhs_dev(double *d_deltaX, double *d_deltaS, double sigma, double 
     cudaDeviceSynchronize();
 }
 
+/** Step-length ratios: t_prim[j] = (dx[j]<0) ? -x[j]/dx[j] : DBL_MAX, same for dual. */
+__global__ void alpha_max_ratios_kernel(const double *x, const double *dx,
+                                        const double *s, const double *ds,
+                                        double *t_prim, double *t_dual, int N)
+{
+    int j = blockIdx.x * blockDim.x + threadIdx.x;
+    if (j >= N)
+        return;
+    double dxj = dx[j];
+    double dsj = ds[j];
+    t_prim[j] = (dxj < 0.0) ? (-x[j] / dxj) : DBL_MAX;
+    t_dual[j] = (dsj < 0.0) ? (-s[j] / dsj) : DBL_MAX;
+}
+
 __global__ void computeMinimum_kernel(double *x, double *result, const unsigned int N)
 {
     extern __shared__ double sdata[];
@@ -115,4 +129,41 @@ __global__ void computeMinimum_kernel(double *x, double *result, const unsigned 
     // Write local minimum
     if (tid == 0)
         result[blockIdx.x] = sdata[0];
+}
+
+/** Compute alphaMaxPrim = min(-x/delta_x over delta_x<0), alphaMaxDual = min(-s/delta_s over delta_s<0) on device.
+ *  Caller must provide device buffers: d_tmp_prim, d_tmp_dual (length N), d_blockmin_prim, d_blockmin_dual (length nBlocks). */
+void alpha_max_dev(const double *d_x, const double *d_deltaX, const double *d_s, const double *d_deltaS,
+                   int N,
+                   double *d_tmp_prim, double *d_tmp_dual,
+                   double *d_blockmin_prim, double *d_blockmin_dual,
+                   double *alphaMaxPrim, double *alphaMaxDual)
+{
+    const int blockDim = 256;
+    const int gridDim = (N + blockDim - 1) / blockDim;
+    const size_t shmem = blockDim * sizeof(double);
+
+    alpha_max_ratios_kernel<<<gridDim, blockDim>>>(d_x, d_deltaX, d_s, d_deltaS, d_tmp_prim, d_tmp_dual, N);
+    computeMinimum_kernel<<<gridDim, blockDim, shmem>>>(d_tmp_prim, d_blockmin_prim, (unsigned int)N);
+    computeMinimum_kernel<<<gridDim, blockDim, shmem>>>(d_tmp_dual, d_blockmin_dual, (unsigned int)N);
+    cudaDeviceSynchronize();
+
+    /* Final min on host over block results */
+    double h_prim[1024], h_dual[1024];
+    if (gridDim > 1024)
+    {
+        cudaDeviceSynchronize();
+        return; /* fallback: leave *alphaMaxPrim/Dual unchanged */
+    }
+    cudaMemcpy(h_prim, d_blockmin_prim, gridDim * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_dual, d_blockmin_dual, gridDim * sizeof(double), cudaMemcpyDeviceToHost);
+    *alphaMaxPrim = h_prim[0];
+    *alphaMaxDual = h_dual[0];
+    for (int i = 1; i < gridDim; i++)
+    {
+        if (h_prim[i] < *alphaMaxPrim)
+            *alphaMaxPrim = h_prim[i];
+        if (h_dual[i] < *alphaMaxDual)
+            *alphaMaxDual = h_dual[i];
+    }
 }

@@ -16,7 +16,7 @@
 
 SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
 {
-    const int reorder = 0;
+    const int reorder = node.env->MEHROTRA_REORDER;
     int singularity = 0;
 
     int i = 0, j = 0, k = 0, iterations = 0;
@@ -27,6 +27,11 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
     double *d_bufferX = NULL;
     double *d_bufferS = NULL;
     double *d_buffer = NULL;
+    double *d_tmp_prim = NULL;
+    double *d_tmp_dual = NULL;
+    double *d_blockmin_prim = NULL;
+    double *d_blockmin_dual = NULL;
+    int nBlocksAlpha = 0;
     char message[1024];
 
     cusparseMatDescr_t A_descr;
@@ -246,6 +251,13 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
 
     node.timePreSolEnd = node.env->timer();
 
+    // Alpha-max reduction buffers (GPU step-length)
+    nBlocksAlpha = (node.ncols + 255) / 256;
+    checkCudaErrors(cudaMalloc((void **)&d_tmp_prim, sizeof(double) * node.ncols));
+    checkCudaErrors(cudaMalloc((void **)&d_tmp_dual, sizeof(double) * node.ncols));
+    checkCudaErrors(cudaMalloc((void **)&d_blockmin_prim, sizeof(double) * nBlocksAlpha));
+    checkCudaErrors(cudaMalloc((void **)&d_blockmin_dual, sizeof(double) * nBlocksAlpha));
+
     ///////////////////             MAIN LOOP
 
     node.env->logger("Mehrotra procedure started", "INFO", 17);
@@ -263,31 +275,10 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
                                             node.env->MEHROTRA_CHOL_TOL, reorder,
                                             d_sol, &singularity));
 
-        // affine step length, definition 14.32 at page 408(427)
-        // alpha_max_p = min([-xi / delta_xi for xi, delta_xi in zip(x, delta_x_aff) if delta_xi < 0.0])
-        // alpha_max_d = min([-si / delta_si for si, delta_si in zip(s, delta_s_aff) if delta_si < 0.0])
-
-        // finding alphaMaxPrim and alphaMaxDual: to improve
-        alphaMaxPrim = DBL_MAX;
-        alphaMaxDual = DBL_MAX;
-        for (j = 0; j < node.ncols; ++j)
-        {
-            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_x[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            checkCudaErrors(cudaMemcpyAsync(&beta, &d_deltaX[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            if (beta < 0.0)
-            {
-                alpha = -(alpha / beta);
-                alphaMaxPrim = alphaMaxPrim < alpha ? alphaMaxPrim : alpha;
-            }
-
-            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_s[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            checkCudaErrors(cudaMemcpyAsync(&beta, &d_deltaS[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            if (beta < 0.0)
-            {
-                alpha = -(alpha / beta);
-                alphaMaxPrim = alphaMaxPrim < alpha ? alphaMaxPrim : alpha;
-            }
-        }
+        // affine step length: alphaMaxPrim = min(-x/dx for dx<0), alphaMaxDual = min(-s/ds for ds<0) on device
+        alpha_max_dev(d_x, d_deltaX, d_s, d_deltaS, node.ncols,
+                      d_tmp_prim, d_tmp_dual, d_blockmin_prim, d_blockmin_dual,
+                      &alphaMaxPrim, &alphaMaxDual);
 
         alphaPrim = gsl_min(1.0, alphaMaxPrim);
         alphaDual = gsl_min(1.0, alphaMaxDual);
@@ -327,27 +318,10 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
                                             node.env->MEHROTRA_CHOL_TOL, reorder,
                                             d_sol, &singularity));
 
-        // finding alphaMaxPrim and alphaMaxDual: to improve
-        alphaMaxPrim = DBL_MAX;
-        alphaMaxDual = DBL_MAX;
-        for (j = 0; j < node.ncols; ++j)
-        {
-            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_x[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            checkCudaErrors(cudaMemcpyAsync(&beta, &d_deltaX[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            if (beta < 0.0)
-            {
-                alpha = -(alpha / beta);
-                alphaMaxPrim = alphaMaxPrim < alpha ? alphaMaxPrim : alpha;
-            }
-
-            checkCudaErrors(cudaMemcpyAsync(&alpha, &d_s[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            checkCudaErrors(cudaMemcpyAsync(&beta, &d_deltaS[j], sizeof(double), cudaMemcpyDeviceToHost, node.cudaStream));
-            if (beta < 0.0)
-            {
-                alpha = -(alpha / beta);
-                alphaMaxDual = alphaMaxDual < alpha ? alphaMaxDual : alpha;
-            }
-        }
+        // corrector step length: alpha-max on device
+        alpha_max_dev(d_x, d_deltaX, d_s, d_deltaS, node.ncols,
+                      d_tmp_prim, d_tmp_dual, d_blockmin_prim, d_blockmin_dual,
+                      &alphaMaxPrim, &alphaMaxDual);
 
         alphaPrim = gsl_min(1.0, node.env->MEHROTRA_ETA * alphaMaxPrim);
         alphaDual = gsl_min(1.0, node.env->MEHROTRA_ETA * alphaMaxDual);
@@ -420,6 +394,14 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
         node.matTransDescr = NULL;
     }
 
+    if (d_tmp_prim)
+        checkCudaErrors(cudaFree(d_tmp_prim));
+    if (d_tmp_dual)
+        checkCudaErrors(cudaFree(d_tmp_dual));
+    if (d_blockmin_prim)
+        checkCudaErrors(cudaFree(d_blockmin_prim));
+    if (d_blockmin_dual)
+        checkCudaErrors(cudaFree(d_blockmin_dual));
     if (d_buffer)
         checkCudaErrors(cudaFree(d_buffer));
 
