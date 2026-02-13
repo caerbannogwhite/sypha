@@ -1,28 +1,37 @@
 # README
 
+### TLDR
+
+GPU-accelerated interior-point solver for Set Covering Problems (SCP).  
+Currently a research / proof-of-concept implementation: **correct and reasonably robust, but not optimised or hardened for production use.**
+
+It's very slow, for sure. 😎
+But it works, for sure. 😎
+
 ### Model
 
-Model should be an abstract class to collect the features of a mathematical model. A Model instance
-should be returned, for instance, when reading an LP file or and SCP file.
-Possible implementations:
+`Model` is intended as an abstract interface capturing the structure of a mathematical program.  
+Concrete instances are created, for example, when reading an LP file or an SCP file.
 
-- ModelLP
-- ModelMILP
+Planned/possible implementations:
 
-Main features:
+- `ModelLP`
+- `ModelMILP`
 
-- Variables: a list of Variable objects (type, name, objective)
-- Constrains: a list of Constraint objects (row, name, sense, rhs)
+Key responsibilities:
+
+- **Variables**: list of `Variable` objects (type, name, objective coefficient)
+- **Constraints**: list of `Constraint` objects (row, name, sense, right-hand side)
 
 ### Node
 
-A Node object maintains the information to get its sub-model representation (crash procedure) from
-the original model.
+A `Node` object stores all the information needed to derive its sub-model (via a crash / initialization procedure) from the original model.
 
 ### Solver
 
-`solver_sparse_merhrotra`
-At each iteration we solve this linear system twice:
+`solver_sparse_mehrotra`
+
+At each interior-point iteration we solve the following linear system (twice, for affine and corrector steps):
 
 ```
       O | A' | I    x    -rc
@@ -32,9 +41,9 @@ At each iteration we solve this linear system twice:
       S | O  | X    s    -rxs
 ```
 
-`A` is the model matrix (in _standard form_), `I` is the _n _ n* identity
-matrix, `S` is the *n _ n_ `s` diagonal matrix, `X` is the _n _ n* `x` diagonal matrix.
-Total number of non-zero elements is *`A.nnz` _ 2 + n _ 3\*.
+`A` is the model matrix in standard form, `I` is the \(n \times n\) identity
+matrix, `S` is the \(n \times n\) diagonal matrix of `s`, and `X` is the \(n \times n\) diagonal matrix of `x`.  
+The total number of non-zero elements in the block system is \(2 \cdot A.nnz + 3n\).
 
 ## SETTING UP
 
