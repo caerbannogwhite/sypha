@@ -20,12 +20,12 @@ private:
     int ncolsOriginal;  // Original columns (before adding slack variables)
     int nnz;
     double objval;
-    double *h_MatDns;
-    double *h_ObjDns;
-    double *h_RhsDns;
-    double *d_MatDns;
-    double *d_ObjDns;
-    double *d_RhsDns;
+    double *hMatDns;
+    double *hObjDns;
+    double *hRhsDns;
+    double *dMatDns;
+    double *dObjDns;
+    double *dRhsDns;
 
     SyphaEnvironment *env;
 

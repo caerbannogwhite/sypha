@@ -55,19 +55,19 @@ SyphaStatus SyphaNodeDense::readModel()
 
 SyphaStatus SyphaNodeDense::copyModelOnDevice()
 {
-    checkCudaErrors(cudaMalloc((void **)&this->d_MatDns, sizeof(double) * this->nrows * this->ncols));
-    checkCudaErrors(cudaMalloc((void **)&this->d_ObjDns, sizeof(double) * this->ncols));
-    checkCudaErrors(cudaMalloc((void **)&this->d_RhsDns, sizeof(double) * this->nrows));
+    checkCudaErrors(cudaMalloc((void **)&this->dMatDns, sizeof(double) * this->nrows * this->ncols));
+    checkCudaErrors(cudaMalloc((void **)&this->dObjDns, sizeof(double) * this->ncols));
+    checkCudaErrors(cudaMalloc((void **)&this->dRhsDns, sizeof(double) * this->nrows));
 
-    checkCudaErrors(cudaMemcpyAsync(this->d_MatDns, this->h_MatDns,
+    checkCudaErrors(cudaMemcpyAsync(this->dMatDns, this->hMatDns,
                                     sizeof(double) * this->nrows * this->ncols, cudaMemcpyHostToDevice,
                                     this->cudaStream));
 
-    checkCudaErrors(cudaMemcpyAsync(this->d_ObjDns, this->h_ObjDns,
+    checkCudaErrors(cudaMemcpyAsync(this->dObjDns, this->hObjDns,
                                     sizeof(double) * this->ncols, cudaMemcpyHostToDevice,
                                     this->cudaStream));
 
-    checkCudaErrors(cudaMemcpyAsync(this->d_RhsDns, this->h_RhsDns,
+    checkCudaErrors(cudaMemcpyAsync(this->dRhsDns, this->hRhsDns,
                                     sizeof(double) * this->nrows, cudaMemcpyHostToDevice,
                                     this->cudaStream));
 

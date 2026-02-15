@@ -23,9 +23,9 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
     node.env->logger(message, "INFO", 15);
 
     ncolsAS = node.ncols + node.nrows;
-    node.h_ObjDns = (double *)calloc(node.ncols + node.nrows, sizeof(double));
-    node.h_RhsDns = (double *)calloc(node.nrows, sizeof(double));
-    node.h_MatDns = (double *)calloc(node.nrows * ncolsAS, sizeof(double));
+    node.hObjDns = (double *)calloc(node.ncols + node.nrows, sizeof(double));
+    node.hRhsDns = (double *)calloc(node.nrows, sizeof(double));
+    node.hMatDns = (double *)calloc(node.nrows * ncolsAS, sizeof(double));
 
     // read objective
     for (j = 0; j < node.ncols; ++j)
@@ -35,7 +35,7 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
             node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
             return CODE_GENERIC_ERROR;
         }
-        node.h_ObjDns[j] = val;
+        node.hObjDns[j] = val;
     }
 
     // read rows
@@ -55,7 +55,7 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
                 node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
                 return CODE_GENERIC_ERROR;
             }
-            node.h_MatDns[i * ncolsAS + idx - 1] = 1.0;
+            node.hMatDns[i * ncolsAS + idx - 1] = 1.0;
         }
     }
 
@@ -65,8 +65,8 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
     nnz += node.nrows;
     for (i = 0; i < node.nrows; ++i)
     {
-        node.h_RhsDns[i] = 1.0;
-        node.h_MatDns[i * ncolsAS + node.ncols + i] = -1.0;
+        node.hRhsDns[i] = 1.0;
+        node.hMatDns[i * ncolsAS + node.ncols + i] = -1.0;
     }
 
     // update num cols
@@ -101,8 +101,8 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
         return CODE_GENERIC_ERROR;
     }
 
-    node.h_ObjDns = (double *)calloc(node.ncols + node.nrows, sizeof(double));
-    node.h_RhsDns = (double *)calloc(node.nrows, sizeof(double));
+    node.hObjDns = (double *)calloc(node.ncols + node.nrows, sizeof(double));
+    node.hRhsDns = (double *)calloc(node.nrows, sizeof(double));
 
     // read objective
     for (j = 0; j < node.ncols; ++j)
@@ -112,7 +112,7 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
             node.env->logger("model_reader_read_scp_file_sparse_coo: fscanf failed.", "ERROR", 0);
             return CODE_GENERIC_ERROR;
         }
-        node.h_ObjDns[j] = val;
+        node.hObjDns[j] = val;
     }
 
     // read rows
@@ -132,9 +132,9 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
                 return CODE_GENERIC_ERROR;
             }
 
-            node.h_cooMat->push_back(SyphaCOOEntry(i, idx - 1, 1.0));
+            node.hCooMat->push_back(SyphaCOOEntry(i, idx - 1, 1.0));
         }
-        node.h_cooMat->push_back(SyphaCOOEntry(i, node.ncols + i, -1.0));
+        node.hCooMat->push_back(SyphaCOOEntry(i, node.ncols + i, -1.0));
     }
 
     fclose(inputFileHandler);
@@ -142,10 +142,10 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
     // add S objective and right hand sides
     for (i = 0; i < node.nrows; ++i)
     {
-        node.h_RhsDns[i] = 1.0;
+        node.hRhsDns[i] = 1.0;
     }
 
-    node.nnz = node.h_cooMat->size();
+    node.nnz = node.hCooMat->size();
     node.ncolsOriginal = node.ncols; // Save original column count before adding slacks
     node.ncols = node.ncols + node.nrows;
 
@@ -177,8 +177,8 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
         return CODE_GENERIC_ERROR;
     }
 
-    node.h_ObjDns = (double *)calloc(node.ncols + node.nrows, sizeof(double));
-    node.h_RhsDns = (double *)calloc(node.nrows, sizeof(double));
+    node.hObjDns = (double *)calloc(node.ncols + node.nrows, sizeof(double));
+    node.hRhsDns = (double *)calloc(node.nrows, sizeof(double));
 
     // read objective
     sprintf(message, "Original model has %d rows and %d columns", node.nrows, node.ncols);
@@ -191,7 +191,7 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
             node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
             return CODE_GENERIC_ERROR;
         }
-        node.h_ObjDns[j] = val;
+        node.hObjDns[j] = val;
     }
 
     // Skip to end of current line after reading costs
@@ -232,20 +232,20 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
     }
 
     // Now build CSR format from rows_data, and add slack variables
-    node.h_csrMatOffs->push_back(0);
+    node.hCsrMatOffs->push_back(0);
     for (i = 0; i < node.nrows; ++i)
     {
         // Add entries for this row (element constraint)
         for (const auto &entry : rows_data[i])
         {
-            node.h_csrMatInds->push_back(entry.first);
-            node.h_csrMatVals->push_back(entry.second);
+            node.hCsrMatInds->push_back(entry.first);
+            node.hCsrMatVals->push_back(entry.second);
         }
         // Add slack variable entry
-        node.h_csrMatInds->push_back(node.ncols + i);
-        node.h_csrMatVals->push_back(-1.0);
+        node.hCsrMatInds->push_back(node.ncols + i);
+        node.hCsrMatVals->push_back(-1.0);
 
-        node.h_csrMatOffs->push_back(node.h_csrMatVals->size());
+        node.hCsrMatOffs->push_back(node.hCsrMatVals->size());
     }
 
     fclose(inputFileHandler);
@@ -254,10 +254,10 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
     // set right hand sides
     for (i = 0; i < node.nrows; ++i)
     {
-        node.h_RhsDns[i] = 1.0;
+        node.hRhsDns[i] = 1.0;
     }
 
-    node.nnz = node.h_csrMatVals->size();
+    node.nnz = node.hCsrMatVals->size();
     node.ncolsOriginal = node.ncols; // Save original column count before adding slacks
     node.ncols = node.ncols + node.nrows;
 

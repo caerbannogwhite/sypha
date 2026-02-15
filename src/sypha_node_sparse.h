@@ -11,6 +11,8 @@
 #include "sypha_cuda_helper.h"
 
 class SyphaEnvironment;
+struct SolverExecutionConfig;
+struct SolverExecutionResult;
 
 class SyphaCOOEntry
 {
@@ -31,29 +33,30 @@ private:
     int nnz;
     double objvalPrim;
     double objvalDual;
+    double mipGap;
 
-    vector<SyphaCOOEntry> *h_cooMat;
+    vector<SyphaCOOEntry> *hCooMat;
 
-    vector<int> *h_csrMatInds;
-    vector<int> *h_csrMatOffs;
-    vector<double> *h_csrMatVals;
-    double *h_ObjDns;
-    double *h_RhsDns;
-    double *h_x;
-    double *h_y;
-    double *h_s;
+    vector<int> *hCsrMatInds;
+    vector<int> *hCsrMatOffs;
+    vector<double> *hCsrMatVals;
+    double *hObjDns;
+    double *hRhsDns;
+    double *hX;
+    double *hY;
+    double *hS;
 
-    int *d_csrMatInds;
-    int *d_csrMatOffs;
-    double *d_csrMatVals;
-    int *d_csrMatTransInds;
-    int *d_csrMatTransOffs;
-    double *d_csrMatTransVals;
-    double *d_ObjDns;
-    double *d_RhsDns;
-    double *d_x;
-    double *d_y;
-    double *d_s;
+    int *dCsrMatInds;
+    int *dCsrMatOffs;
+    double *dCsrMatVals;
+    int *dCsrMatTransInds;
+    int *dCsrMatTransOffs;
+    double *dCsrMatTransVals;
+    double *dObjDns;
+    double *dRhsDns;
+    double *dX;
+    double *dY;
+    double *dS;
 
     int iterations;
     double timeStartSolEnd;
@@ -76,6 +79,8 @@ private:
     cusolverDnHandle_t cusolverDnHandle;
     cusolverSpHandle_t cusolverSpHandle;
 
+    SyphaStatus releaseModelOnDevice();
+
 public:
     SyphaNodeSparse(SyphaEnvironment &env);
     ~SyphaNodeSparse();
@@ -86,6 +91,7 @@ public:
     int getIterations();
     double getObjvalPrim();
     double getObjvalDual();
+    double getMipGap();
     double getTimeStartSol();
     double getTimePreSol();
     double getTimeSolver();
@@ -98,10 +104,12 @@ public:
     friend SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string inputFilePath);
     friend SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string inputFilePath);
     friend SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecutionConfig &config, SolverExecutionResult *result);
     friend SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_1(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node);
 };
 
 #endif // SYPHA_NODE_SPARSE_H

@@ -11,7 +11,7 @@ SyphaStatus solver_dense_mehrotra(SyphaNodeDense &node)
 
     solver_dense_mehrotra_init(node);
 
-    while ((iterations < node.env->MEHROTRA_MAX_ITER) && (mu > node.env->MEHROTRA_MU_TOL))
+    while ((iterations < node.env->mehrotraMaxIter) && (mu > node.env->mehrotraMuTol))
     {
         ++iterations;
     }

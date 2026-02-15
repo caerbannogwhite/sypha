@@ -60,6 +60,17 @@ int main(int argc, char *argv[])
 	env->logger(message, "INFO", 0);
 	sprintf(message, "  Dual:       %.20g", mainNode->getObjvalDual());
 	env->logger(message, "INFO", 0);
+	if (std::isfinite(mainNode->getMipGap()))
+	{
+		sprintf(message, "  MIP gap:    %.6f%%", mainNode->getMipGap() * 100.0);
+	}
+	else
+	{
+		sprintf(message, "  MIP gap:    n/a");
+	}
+	env->logger(message, "INFO", 0);
+
+	env->logger("--- Run statistics ---", "INFO", 0);
 	sprintf(message, "  Iterations: %d", mainNode->getIterations());
 	env->logger(message, "INFO", 0);
 	sprintf(message, "  Time (s):   start %.3f  pre %.2f  solver %.2f  total %.2f",

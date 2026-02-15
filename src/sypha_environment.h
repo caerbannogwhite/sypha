@@ -29,16 +29,31 @@ private:
 
     double timeLimit;
 
-    int DEBUG_LEVEL;
-    double PX_INFINITY;
-    double PX_TOLERANCE;
+    int debugLevel;
+    double pxInfinity;
+    double pxTolerance;
 
     // Merhrotra parameters
-    int MEHROTRA_MAX_ITER = 1000;
-    double MEHROTRA_ETA = 0.95;
-    double MEHROTRA_MU_TOL = 1.E-4;
-    double MEHROTRA_CHOL_TOL = 1.E-8;
-    int MEHROTRA_REORDER = 1; /* 0 = no reorder, 1 = fill-reducing reorder for sparse QR */
+    int mehrotraMaxIter;
+    double mehrotraEta;
+    double mehrotraMuTol;
+    double mehrotraCholTol;
+    int mehrotraReorder; /* 0 = no reorder, 1 = fill-reducing reorder for sparse QR */
+
+    // Branch-and-bound parameters
+    int bnbMaxNodes;
+    int bnbDeviceQueueCapacity;
+    int bnbGapStallBranchIters;
+    double bnbGapStallMinImprovPct;
+    double bnbIntegralityTol;
+    string bnbVarSelectionStrategy;
+    int bnbHeuristicEveryNNodes;
+    string bnbIntHeuristics;
+    double bnbLogIntervalSeconds;
+    double bnbHardTimeLimitSeconds;
+    bool bnbDisable;
+    bool bnbAutoFallbackLp;
+    bool showSolution;
 
 public:
     SyphaEnvironment();
@@ -47,6 +62,7 @@ public:
     int getVerbosityLevel();
     std::string getTest();
     SyphaStatus getStatus();
+    bool getShowSolution();
 
     double timer();
 
@@ -62,10 +78,12 @@ public:
     friend SyphaStatus solver_dense_mehrotra(SyphaNodeDense &node);
     friend SyphaStatus solver_dense_mehrotra_init(SyphaNodeDense &node);
     friend SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecutionConfig &config, SolverExecutionResult *result);
     friend SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_1(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node);
+    friend SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node);
 
     ///////////////////             UNIT TESTS
     friend int test_launcher(SyphaEnvironment &env);

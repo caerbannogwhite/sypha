@@ -10,6 +10,11 @@
 #include <time.h>
 #include <string>
 #include <vector>
+#include <deque>
+#include <map>
+#include <memory>
+#include <limits>
+#include <cmath>
 #include <sys/time.h>
 #include <ctime>
 

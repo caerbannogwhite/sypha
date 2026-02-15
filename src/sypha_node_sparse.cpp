@@ -18,32 +18,33 @@ SyphaNodeSparse::SyphaNodeSparse(SyphaEnvironment &env)
     this->nnz = 0;
     this->objvalPrim = 0.0;
     this->objvalDual = 0.0;
+    this->mipGap = std::numeric_limits<double>::infinity();
 
-    this->h_cooMat = new std::vector<SyphaCOOEntry>();
+    this->hCooMat = new std::vector<SyphaCOOEntry>();
 
-    this->h_csrMatInds = new std::vector<int>();
-    this->h_csrMatOffs = new std::vector<int>();
-    this->h_csrMatVals = new std::vector<double>();
+    this->hCsrMatInds = new std::vector<int>();
+    this->hCsrMatOffs = new std::vector<int>();
+    this->hCsrMatVals = new std::vector<double>();
 
-    h_ObjDns = NULL;
-    h_RhsDns = NULL;
-    h_x = NULL;
-    h_y = NULL;
-    h_s = NULL;
+    hObjDns = NULL;
+    hRhsDns = NULL;
+    hX = NULL;
+    hY = NULL;
+    hS = NULL;
 
-    d_csrMatInds = NULL;
-    d_csrMatOffs = NULL;
-    d_csrMatVals = NULL;
+    dCsrMatInds = NULL;
+    dCsrMatOffs = NULL;
+    dCsrMatVals = NULL;
 
-    d_csrMatTransInds = NULL;
-    d_csrMatTransOffs = NULL;
-    d_csrMatTransVals = NULL;
+    dCsrMatTransInds = NULL;
+    dCsrMatTransOffs = NULL;
+    dCsrMatTransVals = NULL;
 
-    d_ObjDns = NULL;
-    d_RhsDns = NULL;
-    d_x = NULL;
-    d_y = NULL;
-    d_s = NULL;
+    dObjDns = NULL;
+    dRhsDns = NULL;
+    dX = NULL;
+    dY = NULL;
+    dS = NULL;
 
     matDescr = NULL;
     matTransDescr = NULL;
@@ -63,58 +64,35 @@ SyphaNodeSparse::SyphaNodeSparse(SyphaEnvironment &env)
 
 SyphaNodeSparse::~SyphaNodeSparse()
 {
-    if (this->h_cooMat)
-        this->h_cooMat->clear();
+    if (this->hCooMat)
+        this->hCooMat->clear();
 
-    if (this->h_csrMatInds)
-        this->h_csrMatInds->clear();
-    if (this->h_csrMatOffs)
-        this->h_csrMatOffs->clear();
-    if (this->h_csrMatVals)
-        this->h_csrMatVals->clear();
+    if (this->hCsrMatInds)
+        this->hCsrMatInds->clear();
+    if (this->hCsrMatOffs)
+        this->hCsrMatOffs->clear();
+    if (this->hCsrMatVals)
+        this->hCsrMatVals->clear();
 
-    if (this->h_ObjDns)
-        free(this->h_ObjDns);
-    if (this->h_RhsDns)
-        free(this->h_RhsDns);
-    if (this->h_x)
-        free(h_x);
-    if (this->h_y)
-        free(h_y);
-    if (this->h_s)
-        free(h_s);
+    if (this->hObjDns)
+        free(this->hObjDns);
+    if (this->hRhsDns)
+        free(this->hRhsDns);
+    if (this->hX)
+        free(hX);
+    if (this->hY)
+        free(hY);
+    if (this->hS)
+        free(hS);
 
-    if (this->d_csrMatInds)
-        checkCudaErrors(cudaFree(this->d_csrMatInds));
-    if (this->d_csrMatOffs)
-        checkCudaErrors(cudaFree(this->d_csrMatOffs));
-    if (this->d_csrMatVals)
-        checkCudaErrors(cudaFree(this->d_csrMatVals));
+    this->releaseModelOnDevice();
 
-    if (this->d_csrMatTransInds)
-        checkCudaErrors(cudaFree(this->d_csrMatTransInds));
-    if (this->d_csrMatTransOffs)
-        checkCudaErrors(cudaFree(this->d_csrMatTransOffs));
-    if (this->d_csrMatTransVals)
-        checkCudaErrors(cudaFree(this->d_csrMatTransVals));
-
-    if (this->d_ObjDns)
-        checkCudaErrors(cudaFree(this->d_ObjDns));
-    if (this->d_RhsDns)
-        checkCudaErrors(cudaFree(this->d_RhsDns));
-    if (this->d_x)
-        checkCudaErrors(cudaFree(this->d_x));
-    if (this->d_y)
-        checkCudaErrors(cudaFree(this->d_y));
-    if (this->d_s)
-        checkCudaErrors(cudaFree(this->d_s));
-
-    if (this->matDescr)
-        checkCudaErrors(cusparseDestroySpMat(this->matDescr));
-    if (this->objDescr)
-        checkCudaErrors(cusparseDestroyDnVec(this->objDescr));
-    if (this->rhsDescr)
-        checkCudaErrors(cusparseDestroyDnVec(this->rhsDescr));
+    if (this->dX)
+        checkCudaErrors(cudaFree(this->dX));
+    if (this->dY)
+        checkCudaErrors(cudaFree(this->dY));
+    if (this->dS)
+        checkCudaErrors(cudaFree(this->dS));
 
     if (this->cublasHandle)
         checkCudaErrors(cublasDestroy(this->cublasHandle));
@@ -159,6 +137,11 @@ double SyphaNodeSparse::getObjvalDual()
     return this->objvalDual;
 }
 
+double SyphaNodeSparse::getMipGap()
+{
+    return this->mipGap;
+}
+
 double SyphaNodeSparse::getTimeStartSol()
 {
     return this->timeStartSolEnd - this->timeStartSolStart;
@@ -176,7 +159,11 @@ double SyphaNodeSparse::getTimeSolver()
 
 SyphaStatus SyphaNodeSparse::solve()
 {
-    return solver_sparse_mehrotra(*this);
+    if (this->env->bnbDisable)
+    {
+        return solver_sparse_mehrotra(*this);
+    }
+    return solver_sparse_branch_and_bound(*this);
 }
 
 SyphaStatus SyphaNodeSparse::readModel()
@@ -194,42 +181,113 @@ SyphaStatus SyphaNodeSparse::readModel()
 
 SyphaStatus SyphaNodeSparse::copyModelOnDevice()
 {
-    checkCudaErrors(cudaMalloc((void **)&this->d_csrMatInds, sizeof(int) * this->nnz));
-    checkCudaErrors(cudaMalloc((void **)&this->d_csrMatOffs, sizeof(int) * (this->nrows + 1)));
-    checkCudaErrors(cudaMalloc((void **)&this->d_csrMatVals, sizeof(double) * this->nnz));
-    checkCudaErrors(cudaMalloc((void **)&this->d_ObjDns, sizeof(double) * this->ncols));
-    checkCudaErrors(cudaMalloc((void **)&this->d_RhsDns, sizeof(double) * this->nrows));
+    this->releaseModelOnDevice();
 
-    checkCudaErrors(cudaMemcpyAsync(this->d_csrMatInds, this->h_csrMatInds->data(),
+    checkCudaErrors(cudaMalloc((void **)&this->dCsrMatInds, sizeof(int) * this->nnz));
+    checkCudaErrors(cudaMalloc((void **)&this->dCsrMatOffs, sizeof(int) * (this->nrows + 1)));
+    checkCudaErrors(cudaMalloc((void **)&this->dCsrMatVals, sizeof(double) * this->nnz));
+    checkCudaErrors(cudaMalloc((void **)&this->dObjDns, sizeof(double) * this->ncols));
+    checkCudaErrors(cudaMalloc((void **)&this->dRhsDns, sizeof(double) * this->nrows));
+
+    checkCudaErrors(cudaMemcpyAsync(this->dCsrMatInds, this->hCsrMatInds->data(),
                                     sizeof(int) * this->nnz, cudaMemcpyHostToDevice,
                                     this->cudaStream));
 
-    checkCudaErrors(cudaMemcpyAsync(this->d_csrMatOffs, this->h_csrMatOffs->data(),
+    checkCudaErrors(cudaMemcpyAsync(this->dCsrMatOffs, this->hCsrMatOffs->data(),
                                     sizeof(int) * (this->nrows + 1), cudaMemcpyHostToDevice,
                                     this->cudaStream));
 
-    checkCudaErrors(cudaMemcpyAsync(this->d_csrMatVals, this->h_csrMatVals->data(),
+    checkCudaErrors(cudaMemcpyAsync(this->dCsrMatVals, this->hCsrMatVals->data(),
                                     sizeof(double) * this->nnz, cudaMemcpyHostToDevice,
                                     this->cudaStream));
 
-    checkCudaErrors(cudaMemcpyAsync(this->d_ObjDns, this->h_ObjDns,
+    checkCudaErrors(cudaMemcpyAsync(this->dObjDns, this->hObjDns,
                                     sizeof(double) * this->ncols, cudaMemcpyHostToDevice,
                                     this->cudaStream));
 
-    checkCudaErrors(cudaMemcpyAsync(this->d_RhsDns, this->h_RhsDns,
+    checkCudaErrors(cudaMemcpyAsync(this->dRhsDns, this->hRhsDns,
                                     sizeof(double) * this->nrows, cudaMemcpyHostToDevice,
                                     this->cudaStream));
 
     checkCudaErrors(cusparseCreateCsr(&this->matDescr, this->nrows, this->ncols, this->nnz,
-                                      this->d_csrMatOffs, this->d_csrMatInds, this->d_csrMatVals,
+                                      this->dCsrMatOffs, this->dCsrMatInds, this->dCsrMatVals,
                                       CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO,
                                       CUDA_R_64F));
 
     checkCudaErrors(cusparseCreateDnVec(&this->objDescr, (int64_t)this->ncols,
-                                        this->h_ObjDns, CUDA_R_64F));
+                                        this->hObjDns, CUDA_R_64F));
 
     checkCudaErrors(cusparseCreateDnVec(&this->rhsDescr, (int64_t)this->nrows,
-                                        this->h_RhsDns, CUDA_R_64F));
+                                        this->hRhsDns, CUDA_R_64F));
+
+    return CODE_SUCCESFULL;
+}
+
+SyphaStatus SyphaNodeSparse::releaseModelOnDevice()
+{
+    if (this->dCsrMatInds)
+    {
+        checkCudaErrors(cudaFree(this->dCsrMatInds));
+        this->dCsrMatInds = NULL;
+    }
+    if (this->dCsrMatOffs)
+    {
+        checkCudaErrors(cudaFree(this->dCsrMatOffs));
+        this->dCsrMatOffs = NULL;
+    }
+    if (this->dCsrMatVals)
+    {
+        checkCudaErrors(cudaFree(this->dCsrMatVals));
+        this->dCsrMatVals = NULL;
+    }
+
+    if (this->dCsrMatTransInds)
+    {
+        checkCudaErrors(cudaFree(this->dCsrMatTransInds));
+        this->dCsrMatTransInds = NULL;
+    }
+    if (this->dCsrMatTransOffs)
+    {
+        checkCudaErrors(cudaFree(this->dCsrMatTransOffs));
+        this->dCsrMatTransOffs = NULL;
+    }
+    if (this->dCsrMatTransVals)
+    {
+        checkCudaErrors(cudaFree(this->dCsrMatTransVals));
+        this->dCsrMatTransVals = NULL;
+    }
+
+    if (this->dObjDns)
+    {
+        checkCudaErrors(cudaFree(this->dObjDns));
+        this->dObjDns = NULL;
+    }
+    if (this->dRhsDns)
+    {
+        checkCudaErrors(cudaFree(this->dRhsDns));
+        this->dRhsDns = NULL;
+    }
+
+    if (this->matDescr)
+    {
+        checkCudaErrors(cusparseDestroySpMat(this->matDescr));
+        this->matDescr = NULL;
+    }
+    if (this->matTransDescr)
+    {
+        checkCudaErrors(cusparseDestroySpMat(this->matTransDescr));
+        this->matTransDescr = NULL;
+    }
+    if (this->objDescr)
+    {
+        checkCudaErrors(cusparseDestroyDnVec(this->objDescr));
+        this->objDescr = NULL;
+    }
+    if (this->rhsDescr)
+    {
+        checkCudaErrors(cusparseDestroyDnVec(this->rhsDescr));
+        this->rhsDescr = NULL;
+    }
 
     return CODE_SUCCESFULL;
 }
