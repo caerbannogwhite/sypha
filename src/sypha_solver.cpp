@@ -1,8 +1,118 @@
-
+#include "sypha_solver.h"
 #include "sypha_solver_sparse.h"
+#include "sypha_solver_bnb.h"
+#include "sypha_solver_heuristics.h"
+#include "sypha_solver_dense.h"
 #include "sypha_node_sparse.h"
-#include <cctype>
-#include <sstream>
+
+#include "sypha_cuda_helper.h"
+#include <cstdint>
+
+void initializeDenseLinearSolveWorkspace(DenseLinearSolveWorkspace *workspace,
+                                         int nRows,
+                                         int nnz,
+                                         int *dCsrRowOffsets,
+                                         int *dCsrColIndices,
+                                         double *dCsrValues,
+                                         cusparseHandle_t cusparseHandle,
+                                         cusolverDnHandle_t cusolverDnHandle)
+{
+    workspace->isEnabled = true;
+    workspace->nRows = nRows;
+
+    checkCudaErrors(cusparseCreateCsr(&workspace->sparseMatrix,
+                                      (int64_t)nRows, (int64_t)nRows, (int64_t)nnz,
+                                      dCsrRowOffsets, dCsrColIndices, dCsrValues,
+                                      CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
+                                      CUSPARSE_INDEX_BASE_ZERO, CUDA_R_64F));
+
+    checkCudaErrors(cudaMalloc((void **)&workspace->dDenseA, sizeof(double) * (size_t)nRows * (size_t)nRows));
+    checkCudaErrors(cusparseCreateDnMat(&workspace->denseMatrix,
+                                        (int64_t)nRows, (int64_t)nRows, (int64_t)nRows,
+                                        workspace->dDenseA, CUDA_R_64F, CUSPARSE_ORDER_COL));
+
+    checkCudaErrors(cusparseSparseToDense_bufferSize(cusparseHandle, workspace->sparseMatrix, workspace->denseMatrix,
+                                                     CUSPARSE_SPARSETODENSE_ALG_DEFAULT, &workspace->sparseToDenseBufferSize));
+    checkCudaErrors(cudaMalloc((void **)&workspace->dSparseToDenseBuffer, workspace->sparseToDenseBufferSize));
+
+    checkCudaErrors(cusolverDnDgetrf_bufferSize(cusolverDnHandle,
+                                                nRows, nRows,
+                                                workspace->dDenseA, nRows,
+                                                &workspace->luWorkSize));
+    checkCudaErrors(cudaMalloc((void **)&workspace->dLuWork, sizeof(double) * (size_t)workspace->luWorkSize));
+    checkCudaErrors(cudaMalloc((void **)&workspace->dLuPivot, sizeof(int) * (size_t)nRows));
+    checkCudaErrors(cudaMalloc((void **)&workspace->dLuInfo, sizeof(int)));
+}
+
+void releaseDenseLinearSolveWorkspace(DenseLinearSolveWorkspace *workspace)
+{
+    if (workspace->sparseMatrix)
+    {
+        checkCudaErrors(cusparseDestroySpMat(workspace->sparseMatrix));
+        workspace->sparseMatrix = NULL;
+    }
+    if (workspace->denseMatrix)
+    {
+        checkCudaErrors(cusparseDestroyDnMat(workspace->denseMatrix));
+        workspace->denseMatrix = NULL;
+    }
+    if (workspace->dDenseA)
+    {
+        checkCudaErrors(cudaFree(workspace->dDenseA));
+        workspace->dDenseA = NULL;
+    }
+    if (workspace->dLuWork)
+    {
+        checkCudaErrors(cudaFree(workspace->dLuWork));
+        workspace->dLuWork = NULL;
+    }
+    if (workspace->dLuPivot)
+    {
+        checkCudaErrors(cudaFree(workspace->dLuPivot));
+        workspace->dLuPivot = NULL;
+    }
+    if (workspace->dLuInfo)
+    {
+        checkCudaErrors(cudaFree(workspace->dLuInfo));
+        workspace->dLuInfo = NULL;
+    }
+    if (workspace->dSparseToDenseBuffer)
+    {
+        checkCudaErrors(cudaFree(workspace->dSparseToDenseBuffer));
+        workspace->dSparseToDenseBuffer = NULL;
+    }
+    workspace->isEnabled = false;
+}
+
+bool solveDenseLinearSystem(DenseLinearSolveWorkspace *workspace,
+                            const double *dRhs,
+                            double *dSolution,
+                            cusparseHandle_t cusparseHandle,
+                            cusolverDnHandle_t cusolverDnHandle,
+                            cudaStream_t cudaStream)
+{
+    int info = 0;
+    checkCudaErrors(cusparseSparseToDense(cusparseHandle, workspace->sparseMatrix, workspace->denseMatrix,
+                                          CUSPARSE_SPARSETODENSE_ALG_DEFAULT, workspace->dSparseToDenseBuffer));
+    checkCudaErrors(cudaMemcpyAsync(dSolution, dRhs, sizeof(double) * (size_t)workspace->nRows,
+                                    cudaMemcpyDeviceToDevice, cudaStream));
+    checkCudaErrors(cusolverDnDgetrf(cusolverDnHandle,
+                                     workspace->nRows, workspace->nRows,
+                                     workspace->dDenseA, workspace->nRows,
+                                     workspace->dLuWork, workspace->dLuPivot, workspace->dLuInfo));
+    checkCudaErrors(cudaMemcpy(&info, workspace->dLuInfo, sizeof(int), cudaMemcpyDeviceToHost));
+    if (info != 0)
+    {
+        return false;
+    }
+    checkCudaErrors(cusolverDnDgetrs(cusolverDnHandle, CUBLAS_OP_N,
+                                     workspace->nRows, 1,
+                                     workspace->dDenseA, workspace->nRows,
+                                     workspace->dLuPivot, dSolution, workspace->nRows,
+                                     workspace->dLuInfo));
+    checkCudaErrors(cudaMemcpy(&info, workspace->dLuInfo, sizeof(int), cudaMemcpyDeviceToHost));
+    return info == 0;
+}
 
 // CUDA 12+ cuSPARSE: legacy enums removed; use generic API enums
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
@@ -22,6 +132,8 @@ SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node)
     SolverExecutionConfig config;
     config.maxIterations = node.env->mehrotraMaxIter;
     config.gapStagnation.enabled = false;
+    config.bnbNodeOrdinal = 0;
+    config.denseSelectionLogEveryNodes = 1;
 
     SolverExecutionResult result;
     SyphaStatus status = solver_sparse_mehrotra_run(node, config, &result);
@@ -53,6 +165,7 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
     char message[1024];
 
     cusparseMatDescr_t A_descr;
+    DenseLinearSolveWorkspace denseLinearWorkspace;
 
     ///////////////////             GET STARTING POINT
     // initialise x, y, s
@@ -83,6 +196,8 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
     int A_nrows = node.ncols * 2 + node.nrows;
     int A_ncols = A_nrows;
     int A_nnz = node.nnz * 2 + node.ncols * 3;
+    const std::uint64_t denseKktBytes = (std::uint64_t)A_nrows * (std::uint64_t)A_ncols * (std::uint64_t)sizeof(double);
+    bool useDenseLinearSolve = false;
 
     int *h_csrAInds = NULL;
     int *h_csrAOffs = NULL;
@@ -177,6 +292,44 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
     checkCudaErrors(cusparseCreateMatDescr(&A_descr));
     checkCudaErrors(cusparseSetMatType(A_descr, CUSPARSE_MATRIX_TYPE_GENERAL));
     checkCudaErrors(cusparseSetMatIndexBase(A_descr, CUSPARSE_INDEX_BASE_ZERO));
+
+    size_t gpuMemFree = 0;
+    size_t gpuMemTotal = 0;
+    if ((node.env->denseGpuMemoryFractionThreshold > 0.0) &&
+        (cudaMemGetInfo(&gpuMemFree, &gpuMemTotal) == cudaSuccess))
+    {
+        const double thresholdBytes = node.env->denseGpuMemoryFractionThreshold * (double)gpuMemTotal;
+        useDenseLinearSolve = (double)denseKktBytes < thresholdBytes;
+    }
+
+    const int logEveryNodes = config.denseSelectionLogEveryNodes <= 0 ? 1 : config.denseSelectionLogEveryNodes;
+    const bool shouldLogDenseSelection =
+        (config.bnbNodeOrdinal <= 0) ||
+        (logEveryNodes <= 1) ||
+        ((config.bnbNodeOrdinal % logEveryNodes) == 0);
+
+    if (useDenseLinearSolve)
+    {
+        initializeDenseLinearSolveWorkspace(&denseLinearWorkspace, A_nrows, A_nnz,
+                                            d_csrAOffs, d_csrAInds, d_csrAVals,
+                                            node.cusparseHandle, node.cusolverDnHandle);
+        if (shouldLogDenseSelection)
+        {
+            sprintf(message, "Using dense linear solver (KKT %.2f MB, threshold %.2f MB)",
+                    (double)denseKktBytes / (1024.0 * 1024.0),
+                    (node.env->denseGpuMemoryFractionThreshold * (double)gpuMemTotal) / (1024.0 * 1024.0));
+            node.env->logger(message, "INFO", 5);
+        }
+    }
+    else
+    {
+        if (shouldLogDenseSelection)
+        {
+            sprintf(message, "Using sparse linear solver (KKT %.2f MB)",
+                    (double)denseKktBytes / (1024.0 * 1024.0));
+            node.env->logger(message, "INFO", 10);
+        }
+    }
 
     free(h_csrAInds);
     free(h_csrAOffs);
@@ -294,13 +447,26 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         // x, s multiplication: -x.*s on device (was host + 3 full-vector PCIe transfers)
         elem_min_mult_dev(d_x, d_s, d_resXS, node.ncols);
 
-        checkCudaErrors(cusolverSpDcsrlsvqr(node.cusolverSpHandle,
-                                            A_nrows, A_nnz, A_descr,
-                                            d_csrAVals, d_csrAOffs, d_csrAInds,
-                                            d_rhs,
-                                            node.env->mehrotraCholTol, reorder,
-                                            d_sol, &singularity));
-        if (singularity >= 0)
+        if (useDenseLinearSolve)
+        {
+            if (!solveDenseLinearSystem(&denseLinearWorkspace, d_rhs, d_sol,
+                                        node.cusparseHandle, node.cusolverDnHandle, node.cudaStream))
+            {
+                infeasibleOrNumerical = true;
+                terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
+                break;
+            }
+        }
+        else
+        {
+            checkCudaErrors(cusolverSpDcsrlsvqr(node.cusolverSpHandle,
+                                                A_nrows, A_nnz, A_descr,
+                                                d_csrAVals, d_csrAOffs, d_csrAInds,
+                                                d_rhs,
+                                                node.env->mehrotraCholTol, reorder,
+                                                d_sol, &singularity));
+        }
+        if (!useDenseLinearSolve && singularity >= 0)
         {
             infeasibleOrNumerical = true;
             terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
@@ -343,13 +509,26 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
                                     &alpha, d_bufferX, 1, d_resXS, 1));
 
-        checkCudaErrors(cusolverSpDcsrlsvqr(node.cusolverSpHandle,
-                                            A_nrows, A_nnz, A_descr,
-                                            d_csrAVals, d_csrAOffs, d_csrAInds,
-                                            d_rhs,
-                                            node.env->mehrotraCholTol, reorder,
-                                            d_sol, &singularity));
-        if (singularity >= 0)
+        if (useDenseLinearSolve)
+        {
+            if (!solveDenseLinearSystem(&denseLinearWorkspace, d_rhs, d_sol,
+                                        node.cusparseHandle, node.cusolverDnHandle, node.cudaStream))
+            {
+                infeasibleOrNumerical = true;
+                terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
+                break;
+            }
+        }
+        else
+        {
+            checkCudaErrors(cusolverSpDcsrlsvqr(node.cusolverSpHandle,
+                                                A_nrows, A_nnz, A_descr,
+                                                d_csrAVals, d_csrAOffs, d_csrAInds,
+                                                d_rhs,
+                                                node.env->mehrotraCholTol, reorder,
+                                                d_sol, &singularity));
+        }
+        if (!useDenseLinearSolve && singularity >= 0)
         {
             infeasibleOrNumerical = true;
             terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
@@ -476,8 +655,11 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         result->dualObj = node.objvalDual;
         result->relativeGap = finalRelativeGap;
         result->primalSolution.resize((size_t)node.ncols, 0.0);
+        result->dualSolution.resize((size_t)node.nrows, 0.0);
         checkCudaErrors(cudaMemcpy(result->primalSolution.data(), d_x,
                                    sizeof(double) * node.ncols, cudaMemcpyDeviceToHost));
+        checkCudaErrors(cudaMemcpy(result->dualSolution.data(), d_y,
+                                   sizeof(double) * node.nrows, cudaMemcpyDeviceToHost));
     }
 
     ///////////////////             RELEASE RESOURCES
@@ -514,786 +696,12 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
     if (d_buffer)
         checkCudaErrors(cudaFree(d_buffer));
 
+    if (denseLinearWorkspace.isEnabled)
+    {
+        releaseDenseLinearSolveWorkspace(&denseLinearWorkspace);
+    }
+
     return infeasibleOrNumerical ? CODE_GENERIC_ERROR : CODE_SUCCESFULL;
-}
-
-namespace
-{
-struct BranchDecision
-{
-    int varIndex;
-    int fixValue; // 0 => x_j <= 0, 1 => x_j >= 1
-};
-
-struct BranchNodeState
-{
-    std::vector<BranchDecision> decisions;
-    int depth = 0;
-};
-
-struct BaseRelaxationModel
-{
-    int nrows = 0;
-    int ncols = 0;
-    int ncolsOriginal = 0;
-    int nnz = 0;
-    std::vector<int> csrInds;
-    std::vector<int> csrOffs;
-    std::vector<double> csrVals;
-    std::vector<double> obj;
-    std::vector<double> rhs;
-};
-
-struct IntegerHeuristicResult
-{
-    bool feasible = false;
-    double objective = std::numeric_limits<double>::infinity();
-    std::vector<double> solution;
-    std::string name;
-};
-
-struct DeviceQueueEntry
-{
-    int nodeId;
-    int depth;
-    int lastVar;
-    int lastFixValue;
-};
-
-class DeviceNodeWindow
-{
-public:
-    explicit DeviceNodeWindow(int capacity)
-    {
-        cap = (capacity > 0) ? capacity : 1;
-        checkCudaErrors(cudaMalloc((void **)&dEntries, sizeof(DeviceQueueEntry) * (size_t)cap));
-    }
-
-    ~DeviceNodeWindow()
-    {
-        if (dEntries != NULL)
-        {
-            checkCudaErrors(cudaFree(dEntries));
-            dEntries = NULL;
-        }
-    }
-
-    bool hasBufferedNode() const
-    {
-        return cursor < hostWindow.size();
-    }
-
-    bool refill(std::deque<int> &frontier, const std::vector<BranchNodeState> &states)
-    {
-        hostWindow.clear();
-        cursor = 0;
-
-        const int fillCount = std::min((int)frontier.size(), cap);
-        hostWindow.reserve((size_t)fillCount);
-
-        for (int i = 0; i < fillCount; ++i)
-        {
-            const int nodeId = frontier.front();
-            frontier.pop_front();
-
-            DeviceQueueEntry entry;
-            entry.nodeId = nodeId;
-            entry.depth = states[(size_t)nodeId].depth;
-            if (states[(size_t)nodeId].decisions.empty())
-            {
-                entry.lastVar = -1;
-                entry.lastFixValue = -1;
-            }
-            else
-            {
-                const BranchDecision &last = states[(size_t)nodeId].decisions.back();
-                entry.lastVar = last.varIndex;
-                entry.lastFixValue = last.fixValue;
-            }
-            hostWindow.push_back(entry);
-        }
-
-        if (!hostWindow.empty())
-        {
-            checkCudaErrors(cudaMemcpy(dEntries, hostWindow.data(),
-                                       sizeof(DeviceQueueEntry) * hostWindow.size(),
-                                       cudaMemcpyHostToDevice));
-        }
-        return !hostWindow.empty();
-    }
-
-    bool pop(DeviceQueueEntry *outEntry)
-    {
-        if (!hasBufferedNode())
-        {
-            return false;
-        }
-
-        checkCudaErrors(cudaMemcpy(outEntry, dEntries + cursor,
-                                   sizeof(DeviceQueueEntry), cudaMemcpyDeviceToHost));
-        ++cursor;
-        return true;
-    }
-
-private:
-    int cap = 1;
-    DeviceQueueEntry *dEntries = NULL;
-    std::vector<DeviceQueueEntry> hostWindow;
-    size_t cursor = 0;
-};
-
-class IBranchVariableSelector
-{
-public:
-    virtual ~IBranchVariableSelector() {}
-    virtual int select(const std::vector<double> &solution,
-                       const std::vector<double> &objective,
-                       const std::vector<int> &candidates) const = 0;
-};
-
-class IIntegerHeuristic
-{
-public:
-    virtual ~IIntegerHeuristic() {}
-    virtual IntegerHeuristicResult tryBuild(const std::vector<double> &relaxedPrimal,
-                                            const BaseRelaxationModel &base,
-                                            const BranchNodeState &branchNode,
-                                            double tol) const = 0;
-};
-
-class MostFractionalSelector : public IBranchVariableSelector
-{
-public:
-    int select(const std::vector<double> &solution,
-               const std::vector<double> & /*objective*/,
-               const std::vector<int> &candidates) const override
-    {
-        int best = -1;
-        double bestScore = -1.0;
-        for (int idx : candidates)
-        {
-            const double frac = fabs(solution[(size_t)idx] - floor(solution[(size_t)idx] + 0.5));
-            if (frac > bestScore)
-            {
-                bestScore = frac;
-                best = idx;
-            }
-        }
-        return best;
-    }
-};
-
-class HighestCostFractionalSelector : public IBranchVariableSelector
-{
-public:
-    int select(const std::vector<double> & /*solution*/,
-               const std::vector<double> &objective,
-               const std::vector<int> &candidates) const override
-    {
-        int best = -1;
-        double bestCost = -std::numeric_limits<double>::infinity();
-        for (int idx : candidates)
-        {
-            if (objective[(size_t)idx] > bestCost)
-            {
-                bestCost = objective[(size_t)idx];
-                best = idx;
-            }
-        }
-        return best;
-    }
-};
-
-class NearestIntegerFixingHeuristic : public IIntegerHeuristic
-{
-public:
-    IntegerHeuristicResult tryBuild(const std::vector<double> &relaxedPrimal,
-                                    const BaseRelaxationModel &base,
-                                    const BranchNodeState &branchNode,
-                                    double tol) const override
-    {
-        IntegerHeuristicResult out;
-        out.name = "nearest_integer_fixing";
-        out.solution.assign((size_t)base.ncolsOriginal, 0.0);
-
-        if ((int)relaxedPrimal.size() < base.ncolsOriginal)
-        {
-            return out;
-        }
-
-        for (int j = 0; j < base.ncolsOriginal; ++j)
-        {
-            const double rounded = floor(relaxedPrimal[(size_t)j] + 0.5);
-            out.solution[(size_t)j] = rounded < 0.0 ? 0.0 : (rounded > 1.0 ? 1.0 : rounded);
-        }
-
-        // Enforce branch decisions in the rounded incumbent.
-        for (const BranchDecision &d : branchNode.decisions)
-        {
-            if (d.varIndex >= 0 && d.varIndex < base.ncolsOriginal)
-            {
-                out.solution[(size_t)d.varIndex] = (double)d.fixValue;
-            }
-        }
-
-        // Feasibility check for SCP rows: sum_j A_ij * x_j >= rhs_i
-        for (int i = 0; i < base.nrows; ++i)
-        {
-            double coverage = 0.0;
-            for (int k = base.csrOffs[(size_t)i]; k < base.csrOffs[(size_t)i + 1]; ++k)
-            {
-                const int col = base.csrInds[(size_t)k];
-                if (col >= 0 && col < base.ncolsOriginal)
-                {
-                    coverage += base.csrVals[(size_t)k] * out.solution[(size_t)col];
-                }
-            }
-            if (coverage + tol < base.rhs[(size_t)i])
-            {
-                return out;
-            }
-        }
-
-        out.feasible = true;
-        out.objective = 0.0;
-        for (int j = 0; j < base.ncolsOriginal; ++j)
-        {
-            out.objective += base.obj[(size_t)j] * out.solution[(size_t)j];
-        }
-        return out;
-    }
-};
-
-static std::string to_lower_copy(const std::string &s)
-{
-    std::string out = s;
-    std::transform(out.begin(), out.end(), out.begin(),
-                   [](unsigned char c)
-                   { return (char)std::tolower(c); });
-    return out;
-}
-
-static std::unique_ptr<IBranchVariableSelector> make_selector(const std::string &strategy)
-{
-    const std::string s = to_lower_copy(strategy);
-    if (s == "highest_cost_fractional")
-    {
-        return std::unique_ptr<IBranchVariableSelector>(new HighestCostFractionalSelector());
-    }
-    return std::unique_ptr<IBranchVariableSelector>(new MostFractionalSelector());
-}
-
-static std::vector<std::string> split_csv_tokens(const std::string &csv)
-{
-    std::vector<std::string> tokens;
-    std::stringstream ss(csv);
-    std::string item;
-    while (std::getline(ss, item, ','))
-    {
-        std::string cleaned;
-        cleaned.reserve(item.size());
-        for (char c : item)
-        {
-            if (!std::isspace((unsigned char)c))
-            {
-                cleaned.push_back(c);
-            }
-        }
-        if (!cleaned.empty())
-        {
-            tokens.push_back(to_lower_copy(cleaned));
-        }
-    }
-    return tokens;
-}
-
-static std::vector<std::unique_ptr<IIntegerHeuristic>> make_integer_heuristics(const std::string &configured)
-{
-    std::vector<std::unique_ptr<IIntegerHeuristic>> heuristics;
-    const std::vector<std::string> tokens = split_csv_tokens(configured);
-    if (tokens.empty())
-    {
-        heuristics.push_back(std::unique_ptr<IIntegerHeuristic>(new NearestIntegerFixingHeuristic()));
-        return heuristics;
-    }
-
-    for (const std::string &token : tokens)
-    {
-        if (token == "nearest_integer_fixing")
-        {
-            heuristics.push_back(std::unique_ptr<IIntegerHeuristic>(new NearestIntegerFixingHeuristic()));
-        }
-    }
-    if (heuristics.empty())
-    {
-        heuristics.push_back(std::unique_ptr<IIntegerHeuristic>(new NearestIntegerFixingHeuristic()));
-    }
-    return heuristics;
-}
-
-static bool append_decision_if_consistent(const BranchNodeState &parent, int var, int value, BranchNodeState *child)
-{
-    *child = parent;
-    for (const BranchDecision &d : parent.decisions)
-    {
-        if (d.varIndex == var)
-        {
-            return d.fixValue == value;
-        }
-    }
-    child->decisions.push_back({var, value});
-    child->depth = parent.depth + 1;
-    return true;
-}
-
-static bool is_binary_integral_solution(const std::vector<double> &x, int ncolsOriginal, double tol)
-{
-    for (int j = 0; j < ncolsOriginal; ++j)
-    {
-        const double v = x[(size_t)j];
-        const double nearest = floor(v + 0.5);
-        if (fabs(v - nearest) > tol)
-        {
-            return false;
-        }
-        if ((nearest < -tol) || (nearest > 1.0 + tol))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-static std::vector<int> collect_fractional_candidates(const std::vector<double> &x, int ncolsOriginal, double tol)
-{
-    std::vector<int> candidates;
-    candidates.reserve((size_t)ncolsOriginal);
-    for (int j = 0; j < ncolsOriginal; ++j)
-    {
-        const double v = x[(size_t)j];
-        const double nearest = floor(v + 0.5);
-        if ((fabs(v - nearest) > tol) || (nearest < -tol) || (nearest > 1.0 + tol))
-        {
-            candidates.push_back(j);
-        }
-    }
-    return candidates;
-}
-
-static double compute_mip_gap(double incumbent, double dualBound)
-{
-    if (!std::isfinite(incumbent) || !std::isfinite(dualBound))
-    {
-        return std::numeric_limits<double>::infinity();
-    }
-    if (dualBound > incumbent)
-    {
-        // Invalid for minimization: lower bound cannot exceed incumbent.
-        return std::numeric_limits<double>::infinity();
-    }
-    return (incumbent - dualBound) / std::max(1.0, fabs(incumbent));
-}
-
-static void build_branch_model(const BaseRelaxationModel &base,
-                               const BranchNodeState &branchNode,
-                               std::vector<int> *csrInds,
-                               std::vector<int> *csrOffs,
-                               std::vector<double> *csrVals,
-                               std::vector<double> *obj,
-                               std::vector<double> *rhs)
-{
-    *csrInds = base.csrInds;
-    *csrOffs = base.csrOffs;
-    *csrVals = base.csrVals;
-    *obj = base.obj;
-    *rhs = base.rhs;
-
-    const int extraRows = (int)branchNode.decisions.size();
-    if (extraRows == 0)
-    {
-        return;
-    }
-
-    csrInds->reserve((size_t)(base.nnz + 2 * extraRows));
-    csrVals->reserve((size_t)(base.nnz + 2 * extraRows));
-    rhs->reserve((size_t)(base.nrows + extraRows));
-    obj->reserve((size_t)(base.ncols + extraRows));
-    csrOffs->reserve((size_t)(base.nrows + extraRows + 1));
-
-    for (int row = 0; row < extraRows; ++row)
-    {
-        const BranchDecision &d = branchNode.decisions[(size_t)row];
-        const int slackCol = base.ncols + row;
-
-        csrInds->push_back(d.varIndex);
-        csrVals->push_back(d.fixValue == 0 ? -1.0 : 1.0);
-
-        csrInds->push_back(slackCol);
-        csrVals->push_back(-1.0);
-
-        csrOffs->push_back(csrOffs->back() + 2);
-        rhs->push_back((double)d.fixValue);
-        obj->push_back(0.0);
-    }
-}
-} // namespace
-
-SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
-{
-    BaseRelaxationModel base;
-    base.nrows = node.nrows;
-    base.ncols = node.ncols;
-    base.ncolsOriginal = node.ncolsOriginal;
-    base.nnz = node.nnz;
-    base.csrInds = *node.hCsrMatInds;
-    base.csrOffs = *node.hCsrMatOffs;
-    base.csrVals = *node.hCsrMatVals;
-    base.obj.assign(node.hObjDns, node.hObjDns + node.ncols);
-    base.rhs.assign(node.hRhsDns, node.hRhsDns + node.nrows);
-
-    std::unique_ptr<IBranchVariableSelector> selector = make_selector(node.env->bnbVarSelectionStrategy);
-    std::vector<std::unique_ptr<IIntegerHeuristic>> heuristics = make_integer_heuristics(node.env->bnbIntHeuristics);
-    const int heuristicFrequency = node.env->bnbHeuristicEveryNNodes > 0 ? node.env->bnbHeuristicEveryNNodes : 10;
-
-    // Keep the original LP matrix resident on the device for the whole BnB run.
-    int *d_baseInds = NULL;
-    int *d_baseOffs = NULL;
-    double *d_baseVals = NULL;
-    if (node.dCsrMatInds && node.dCsrMatOffs && node.dCsrMatVals)
-    {
-        checkCudaErrors(cudaMalloc((void **)&d_baseInds, sizeof(int) * (size_t)base.nnz));
-        checkCudaErrors(cudaMalloc((void **)&d_baseOffs, sizeof(int) * (size_t)(base.nrows + 1)));
-        checkCudaErrors(cudaMalloc((void **)&d_baseVals, sizeof(double) * (size_t)base.nnz));
-        checkCudaErrors(cudaMemcpy(d_baseInds, node.dCsrMatInds, sizeof(int) * (size_t)base.nnz, cudaMemcpyDeviceToDevice));
-        checkCudaErrors(cudaMemcpy(d_baseOffs, node.dCsrMatOffs, sizeof(int) * (size_t)(base.nrows + 1), cudaMemcpyDeviceToDevice));
-        checkCudaErrors(cudaMemcpy(d_baseVals, node.dCsrMatVals, sizeof(double) * (size_t)base.nnz, cudaMemcpyDeviceToDevice));
-    }
-
-    std::vector<BranchNodeState> nodes;
-    nodes.push_back(BranchNodeState());
-
-    std::deque<int> frontier;
-    frontier.push_back(0);
-
-    DeviceNodeWindow deviceWindow(node.env->bnbDeviceQueueCapacity);
-
-    const double integralityTol = node.env->bnbIntegralityTol;
-    double bestIntegerObj = std::numeric_limits<double>::infinity();
-    double globalRelaxLowerBound = std::numeric_limits<double>::infinity();
-    std::vector<double> bestIntegerSolution;
-    std::string incumbentSource = "none";
-
-    int processedNodes = 0;
-    int totalLpIterations = 0;
-    char message[1024];
-    node.env->logger("Branch-and-bound started", "INFO", 5);
-    node.timeSolverStart = node.env->timer();
-    const double bnbStartMs = node.timeSolverStart;
-    const double logIntervalMs = node.env->bnbLogIntervalSeconds > 0.0 ? node.env->bnbLogIntervalSeconds * 1000.0 : 0.0;
-    const double hardTimeLimitMs = node.env->bnbHardTimeLimitSeconds > 0.0 ? node.env->bnbHardTimeLimitSeconds * 1000.0 : 0.0;
-    double nextLogMs = bnbStartMs + logIntervalMs;
-    bool hardTimeLimitReached = false;
-    bool frontierExhausted = false;
-    auto releaseBaseCopies = [&]() {
-        if (d_baseInds)
-            checkCudaErrors(cudaFree(d_baseInds));
-        if (d_baseOffs)
-            checkCudaErrors(cudaFree(d_baseOffs));
-        if (d_baseVals)
-            checkCudaErrors(cudaFree(d_baseVals));
-        d_baseInds = NULL;
-        d_baseOffs = NULL;
-        d_baseVals = NULL;
-    };
-
-    while (processedNodes < node.env->bnbMaxNodes)
-    {
-        const double loopNowMs = node.env->timer();
-        if ((hardTimeLimitMs > 0.0) && ((loopNowMs - bnbStartMs) >= hardTimeLimitMs))
-        {
-            hardTimeLimitReached = true;
-            node.env->logger("BnB hard time limit reached", "INFO", 5);
-            break;
-        }
-        if ((logIntervalMs > 0.0) && (loopNowMs >= nextLogMs))
-        {
-            const double currGap = compute_mip_gap(bestIntegerObj, globalRelaxLowerBound);
-            if (std::isfinite(currGap))
-            {
-                sprintf(message, "BnB progress: nodes=%d frontier=%zu incumbent=%.12g dual=%.12g gap=%.4f%% elapsed=%.2fs",
-                        processedNodes, frontier.size(), bestIntegerObj, globalRelaxLowerBound, currGap * 100.0, (loopNowMs - bnbStartMs) / 1000.0);
-            }
-            else
-            {
-                sprintf(message, "BnB progress: nodes=%d frontier=%zu incumbent=inf dual=%.12g gap=inf elapsed=%.2fs",
-                        processedNodes, frontier.size(), globalRelaxLowerBound, (loopNowMs - bnbStartMs) / 1000.0);
-            }
-            node.env->logger(message, "INFO", 5);
-            nextLogMs = loopNowMs + logIntervalMs;
-        }
-
-        if (!deviceWindow.hasBufferedNode())
-        {
-            if (!deviceWindow.refill(frontier, nodes))
-            {
-                frontierExhausted = true;
-                break;
-            }
-        }
-
-        DeviceQueueEntry entry;
-        if (!deviceWindow.pop(&entry))
-        {
-            continue;
-        }
-
-        const BranchNodeState branchNode = nodes[(size_t)entry.nodeId];
-
-        std::vector<int> workInds;
-        std::vector<int> workOffs;
-        std::vector<double> workVals;
-        std::vector<double> workObj;
-        std::vector<double> workRhs;
-        build_branch_model(base, branchNode, &workInds, &workOffs, &workVals, &workObj, &workRhs);
-
-        node.nrows = base.nrows + (int)branchNode.decisions.size();
-        node.ncols = base.ncols + (int)branchNode.decisions.size();
-        node.nnz = base.nnz + 2 * (int)branchNode.decisions.size();
-        node.ncolsOriginal = base.ncolsOriginal;
-
-        *node.hCsrMatInds = workInds;
-        *node.hCsrMatOffs = workOffs;
-        *node.hCsrMatVals = workVals;
-
-        if (node.hObjDns)
-        {
-            free(node.hObjDns);
-            node.hObjDns = NULL;
-        }
-        if (node.hRhsDns)
-        {
-            free(node.hRhsDns);
-            node.hRhsDns = NULL;
-        }
-        node.hObjDns = (double *)calloc((size_t)node.ncols, sizeof(double));
-        node.hRhsDns = (double *)calloc((size_t)node.nrows, sizeof(double));
-        memcpy(node.hObjDns, workObj.data(), sizeof(double) * (size_t)node.ncols);
-        memcpy(node.hRhsDns, workRhs.data(), sizeof(double) * (size_t)node.nrows);
-
-        if (node.copyModelOnDevice() != CODE_SUCCESFULL)
-        {
-            releaseBaseCopies();
-            return CODE_GENERIC_ERROR;
-        }
-
-        SolverExecutionConfig config;
-        config.maxIterations = node.env->mehrotraMaxIter;
-        config.gapStagnation.enabled = true;
-        config.gapStagnation.windowIterations = node.env->bnbGapStallBranchIters;
-        config.gapStagnation.minImprovementPct = node.env->bnbGapStallMinImprovPct;
-
-        SolverExecutionResult result;
-        const SyphaStatus solveStatus = solver_sparse_mehrotra_run(node, config, &result);
-        if (solveStatus != CODE_SUCCESFULL || result.status != CODE_SUCCESFULL)
-        {
-            if (entry.nodeId == 0)
-            {
-                node.env->logger("Root LP relaxation infeasible or numerically unstable; aborting BnB", "INFO", 5);
-                node.objvalPrim = std::numeric_limits<double>::infinity();
-                node.objvalDual = std::numeric_limits<double>::infinity();
-                node.mipGap = std::numeric_limits<double>::infinity();
-                node.iterations = result.iterations;
-                node.timeSolverEnd = node.env->timer();
-                releaseBaseCopies();
-                return CODE_GENERIC_ERROR;
-            }
-            continue;
-        }
-
-        ++processedNodes;
-        totalLpIterations += result.iterations;
-        const bool boundIsReliable = (result.terminationReason == SOLVER_TERM_CONVERGED);
-        if (boundIsReliable)
-        {
-            globalRelaxLowerBound = std::min(globalRelaxLowerBound, result.primalObj);
-        }
-
-        if ((processedNodes == 1) || ((heuristicFrequency > 0) && (processedNodes % heuristicFrequency == 0)))
-        {
-            for (const auto &heuristic : heuristics)
-            {
-                IntegerHeuristicResult heuristicRes = heuristic->tryBuild(result.primalSolution, base, branchNode, integralityTol);
-                if (heuristicRes.feasible && heuristicRes.objective < bestIntegerObj - node.env->pxTolerance)
-                {
-                    bestIntegerObj = heuristicRes.objective;
-                    bestIntegerSolution = heuristicRes.solution;
-                    incumbentSource = heuristicRes.name;
-                    if (node.env->showSolution)
-                    {
-                        sprintf(message, "New incumbent from heuristic '%s': %.12g", heuristicRes.name.c_str(), heuristicRes.objective);
-                    }
-                    else
-                    {
-                        sprintf(message, "New incumbent found: %.12g", heuristicRes.objective);
-                    }
-                    node.env->logger(message, "INFO", 5);
-                    break;
-                }
-            }
-        }
-
-        if (boundIsReliable && (result.primalObj >= bestIntegerObj - node.env->pxTolerance))
-        {
-            continue;
-        }
-
-        const bool isIntegral = is_binary_integral_solution(result.primalSolution, base.ncolsOriginal, integralityTol);
-        if (isIntegral)
-        {
-            bestIntegerObj = result.primalObj;
-            bestIntegerSolution = result.primalSolution;
-            incumbentSource = "exact_node";
-            continue;
-        }
-
-        std::vector<int> fractionalCandidates =
-            collect_fractional_candidates(result.primalSolution, base.ncolsOriginal, integralityTol);
-        if (fractionalCandidates.empty())
-        {
-            continue;
-        }
-
-        const int branchVar = selector->select(result.primalSolution, base.obj, fractionalCandidates);
-        if (branchVar < 0)
-        {
-            continue;
-        }
-
-        BranchNodeState childZero;
-        if (append_decision_if_consistent(branchNode, branchVar, 0, &childZero))
-        {
-            nodes.push_back(childZero);
-            frontier.push_back((int)nodes.size() - 1);
-        }
-
-        BranchNodeState childOne;
-        if (append_decision_if_consistent(branchNode, branchVar, 1, &childOne))
-        {
-            nodes.push_back(childOne);
-            frontier.push_back((int)nodes.size() - 1);
-        }
-    }
-
-    node.iterations = totalLpIterations;
-    if (std::isfinite(bestIntegerObj))
-    {
-        node.objvalPrim = bestIntegerObj;
-        if (node.hX)
-        {
-            free(node.hX);
-            node.hX = NULL;
-        }
-        node.hX = (double *)calloc((size_t)base.ncolsOriginal, sizeof(double));
-        memcpy(node.hX, bestIntegerSolution.data(), sizeof(double) * (size_t)base.ncolsOriginal);
-    }
-    else
-    {
-        node.objvalPrim = std::numeric_limits<double>::infinity();
-    }
-    if (std::isfinite(bestIntegerObj) &&
-        frontierExhausted &&
-        !hardTimeLimitReached &&
-        (processedNodes < node.env->bnbMaxNodes))
-    {
-        // Full tree exhaustion with an incumbent means optimality is proven.
-        node.objvalDual = bestIntegerObj;
-        node.mipGap = 0.0;
-        node.env->logger("Optimality proven: search frontier exhausted", "INFO", 5);
-    }
-    else
-    {
-        node.objvalDual = globalRelaxLowerBound;
-        node.mipGap = compute_mip_gap(node.objvalPrim, node.objvalDual);
-    }
-
-    sprintf(message, "Branch-and-bound processed %d nodes", processedNodes);
-    node.env->logger(message, "INFO", 5);
-    sprintf(message, "Total LP iterations across nodes: %d", totalLpIterations);
-    node.env->logger(message, "INFO", 5);
-    if (std::isfinite(bestIntegerObj))
-    {
-        node.env->logger("Best integer incumbent found", "INFO", 5);
-        if (node.env->showSolution)
-        {
-            sprintf(message, "  Source: %s", incumbentSource.c_str());
-            node.env->logger(message, "INFO", 5);
-            for (int j = 0; j < base.ncolsOriginal; ++j)
-            {
-                if (bestIntegerSolution[(size_t)j] > 0.5)
-                {
-                    sprintf(message, "  x[%d] = %.0f", j, bestIntegerSolution[(size_t)j]);
-                    node.env->logger(message, "INFO", 5);
-                }
-            }
-        }
-    }
-    else
-    {
-        node.env->logger("No integer incumbent found within node limit", "INFO", 5);
-        if (hardTimeLimitReached)
-        {
-            node.env->logger("Search stopped by hard time limit", "INFO", 5);
-        }
-        if (node.env->bnbAutoFallbackLp)
-        {
-            node.env->logger("Falling back to LP relaxation solve", "INFO", 5);
-
-            node.nrows = base.nrows;
-            node.ncols = base.ncols;
-            node.ncolsOriginal = base.ncolsOriginal;
-            node.nnz = base.nnz;
-
-            *node.hCsrMatInds = base.csrInds;
-            *node.hCsrMatOffs = base.csrOffs;
-            *node.hCsrMatVals = base.csrVals;
-
-            if (node.hObjDns)
-            {
-                free(node.hObjDns);
-                node.hObjDns = NULL;
-            }
-            if (node.hRhsDns)
-            {
-                free(node.hRhsDns);
-                node.hRhsDns = NULL;
-            }
-            node.hObjDns = (double *)calloc((size_t)node.ncols, sizeof(double));
-            node.hRhsDns = (double *)calloc((size_t)node.nrows, sizeof(double));
-            memcpy(node.hObjDns, base.obj.data(), sizeof(double) * (size_t)node.ncols);
-            memcpy(node.hRhsDns, base.rhs.data(), sizeof(double) * (size_t)node.nrows);
-
-            if (node.copyModelOnDevice() != CODE_SUCCESFULL)
-            {
-                releaseBaseCopies();
-                return CODE_GENERIC_ERROR;
-            }
-
-            releaseBaseCopies();
-
-            const SyphaStatus lpStatus = solver_sparse_mehrotra(node);
-            if (lpStatus == CODE_SUCCESFULL)
-            {
-                node.iterations += totalLpIterations;
-            }
-            return lpStatus;
-        }
-    }
-
-    releaseBaseCopies();
-
-    node.timeSolverEnd = node.env->timer();
-
-    return CODE_SUCCESFULL;
 }
 
 SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
@@ -1943,5 +1351,31 @@ SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node)
     gsl_matrix_free(tmp);
     gsl_permutation_free(perm);
 
+    return CODE_SUCCESFULL;
+}
+
+
+/**
+ * Dense Mehrotra interior point solver (stub).
+ * The active solver is the sparse path (SyphaNodeSparse / solver_sparse_mehrotra).
+ */
+SyphaStatus solver_dense_mehrotra(SyphaNodeDense &node)
+{
+    int iterations = 0;
+    double mu = 0.0;
+
+    solver_dense_mehrotra_init(node);
+
+    while ((iterations < node.env->mehrotraMaxIter) && (mu > node.env->mehrotraMuTol))
+    {
+        ++iterations;
+    }
+
+    return CODE_SUCCESFULL;
+}
+
+SyphaStatus solver_dense_mehrotra_init(SyphaNodeDense &node)
+{
+    (void)node;
     return CODE_SUCCESFULL;
 }

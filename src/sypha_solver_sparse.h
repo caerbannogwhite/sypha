@@ -28,6 +28,8 @@ struct SolverExecutionConfig
 {
     int maxIterations = sypha_environment_defaults::kMehrotraMaxIter;
     SolverGapStagnationConfig gapStagnation;
+    int bnbNodeOrdinal = 0;
+    int denseSelectionLogEveryNodes = 1;
 };
 
 struct SolverExecutionResult
@@ -39,6 +41,7 @@ struct SolverExecutionResult
     double dualObj = 0.0;
     double relativeGap = std::numeric_limits<double>::infinity();
     std::vector<double> primalSolution;
+    std::vector<double> dualSolution;
 };
 
 SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecutionConfig &config, SolverExecutionResult *result);

@@ -16,6 +16,7 @@ constexpr double kMehrotraEta = 0.95;
 constexpr double kMehrotraMuTol = 1e-4;
 constexpr double kMehrotraCholTol = 1e-8;
 constexpr int kMehrotraReorder = 1;
+constexpr double kDenseGpuMemoryFractionThreshold = 2.0 / 3.0;
 
 constexpr int kBnbMaxNodes = 100000;
 constexpr int kBnbDeviceQueueCapacity = 1000;
@@ -37,7 +38,7 @@ inline const std::string &kBnbVarSelectionStrategy()
 
 inline const std::string &kBnbIntHeuristics()
 {
-    static const std::string value = "nearest_integer_fixing";
+    static const std::string value = "nearest_integer_fixing,dual_guided_cover_repair";
     return value;
 }
 } // namespace sypha_environment_defaults

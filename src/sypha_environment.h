@@ -39,6 +39,7 @@ private:
     double mehrotraMuTol;
     double mehrotraCholTol;
     int mehrotraReorder; /* 0 = no reorder, 1 = fill-reducing reorder for sparse QR */
+    double denseGpuMemoryFractionThreshold;
 
     // Branch-and-bound parameters
     int bnbMaxNodes;
@@ -85,10 +86,6 @@ public:
     friend SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node);
 
-    ///////////////////             UNIT TESTS
-    friend int test_launcher(SyphaEnvironment &env);
-    friend int sypha_test_scp4(SyphaEnvironment &env, int &pass);
-    friend int sypha_test_scp5(SyphaEnvironment &env, int &pass);
 };
 
 #endif // SYPHA_ENVIRONMENT_H

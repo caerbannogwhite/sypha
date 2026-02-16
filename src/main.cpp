@@ -11,12 +11,6 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	if (env->getTest().compare("none") != 0)
-	{
-		test_launcher(*env);
-		return 0;
-	}
-
 	if (env->getVerbosityLevel() > 1)
 	{
 		std::cout << std::endl;
@@ -39,19 +33,32 @@ int main(int argc, char *argv[])
 
 	env->logger("Environment initialised", "INFO", 5);
 	double timeStart = env->timer();
+	SyphaStatus runStatus = CODE_SUCCESFULL;
 
-	if (mainNode->readModel() != CODE_SUCCESFULL)
+	env->logger("Reading model", "INFO", 5);
+	runStatus = mainNode->readModel();
+	if (runStatus != CODE_SUCCESFULL)
 	{
+		sprintf(message, "readModel failed with status %d", (int)runStatus);
+		env->logger(message, "ERROR", 0);
 		return 1;
 	}
 
-	if (mainNode->copyModelOnDevice() != CODE_SUCCESFULL)
+	env->logger("Copying model to device", "INFO", 5);
+	runStatus = mainNode->copyModelOnDevice();
+	if (runStatus != CODE_SUCCESFULL)
 	{
+		sprintf(message, "copyModelOnDevice failed with status %d", (int)runStatus);
+		env->logger(message, "ERROR", 0);
 		return 1;
 	}
 
-	if (mainNode->solve() != CODE_SUCCESFULL)
+	env->logger("Launching solver", "INFO", 5);
+	runStatus = mainNode->solve();
+	if (runStatus != CODE_SUCCESFULL)
 	{
+		sprintf(message, "solve failed with status %d", (int)runStatus);
+		env->logger(message, "ERROR", 0);
 		return 1;
 	}
 

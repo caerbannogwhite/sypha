@@ -9,11 +9,15 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
 
     node.env->logger("Start scanning SCP model at " + inputFilePath, "INFO", 10);
     FILE *inputFileHandler = fopen(inputFilePath.c_str(), "r");
+    if (inputFileHandler == NULL)
+    {
+        node.env->logger("model_reader_read_scp_file_dense: cannot open input file.", "ERROR", 0);
+        return CODE_GENERIC_ERROR;
+    }
 
-    // read number of sets and elements
-    // SCP file format: num_sets num_elements
-    // In standard form: sets are columns (variables), elements are rows (constraints)
-    if (!fscanf(inputFileHandler, "%d %d", &node.ncols, &node.nrows))
+    // OR-Library SCP format: num_rows num_cols
+    // Constraints (elements) are rows, set variables are columns.
+    if (!fscanf(inputFileHandler, "%d %d", &node.nrows, &node.ncols))
     {
         node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
         return CODE_GENERIC_ERROR;
@@ -91,11 +95,15 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
 
     node.env->logger("Start scanning SCP model at " + inputFilePath, "INFO", 10);
     FILE *inputFileHandler = fopen(inputFilePath.c_str(), "r");
+    if (inputFileHandler == NULL)
+    {
+        node.env->logger("model_reader_read_scp_file_sparse_coo: cannot open input file.", "ERROR", 0);
+        return CODE_GENERIC_ERROR;
+    }
 
-    // read number of sets and elements
-    // SCP file format: num_sets num_elements
-    // In standard form: sets are columns (variables), elements are rows (constraints)
-    if (!fscanf(inputFileHandler, "%d %d", &node.ncols, &node.nrows))
+    // OR-Library SCP format: num_rows num_cols
+    // Constraints (elements) are rows, set variables are columns.
+    if (!fscanf(inputFileHandler, "%d %d", &node.nrows, &node.ncols))
     {
         node.env->logger("model_reader_read_scp_file_sparse_coo: fscanf failed.", "ERROR", 0);
         return CODE_GENERIC_ERROR;
@@ -167,11 +175,15 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
 
     node.env->logger("Start scanning SCP model at " + inputFilePath, "INFO", 10);
     FILE *inputFileHandler = fopen(inputFilePath.c_str(), "r");
+    if (inputFileHandler == NULL)
+    {
+        node.env->logger("model_reader_read_scp_file_sparse_csr: cannot open input file.", "ERROR", 0);
+        return CODE_GENERIC_ERROR;
+    }
 
-    // read number of sets and elements
-    // SCP file format: num_sets num_elements
-    // In standard form: sets are columns (variables), elements are rows (constraints)
-    if (!fscanf(inputFileHandler, "%d %d", &node.ncols, &node.nrows))
+    // OR-Library SCP format: num_rows num_cols
+    // Constraints (elements) are rows, set variables are columns.
+    if (!fscanf(inputFileHandler, "%d %d", &node.nrows, &node.ncols))
     {
         node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
         return CODE_GENERIC_ERROR;
@@ -194,23 +206,10 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
         node.hObjDns[j] = val;
     }
 
-    // Skip to end of current line after reading costs
-    // (costs and first set definition may share a line)
-    int c;
-    while ((c = fgetc(inputFileHandler)) != '\n' && c != EOF)
-    {
-        // discard remaining characters on the line
-    }
-
-    // read sets and build matrix
-    // File has one line per set, describing which elements it covers
-    // We need to build matrix A where A[elem][set] = 1 if set covers elem
-    node.env->logger("Start scanning sets", "INFO", 20);
-
-    // Use vector to accumulate rows, since we're reading by columns (sets)
-    vector<vector<pair<int, double>>> rows_data(node.nrows);
-
-    for (j = 0; j < node.ncols; ++j) // iterate over sets
+    // Read rows directly: each row lists the covering set indices.
+    node.env->logger("Start scanning rows", "INFO", 20);
+    node.hCsrMatOffs->push_back(0);
+    for (i = 0; i < node.nrows; ++i)
     {
         if (!fscanf(inputFileHandler, "%d", &currColNumber))
         {
@@ -218,29 +217,18 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
             return CODE_GENERIC_ERROR;
         }
 
-        for (int k = 0; k < currColNumber; ++k)
+        for (j = 0; j < currColNumber; ++j)
         {
             if (!fscanf(inputFileHandler, "%d", &idx))
             {
                 node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
                 return CODE_GENERIC_ERROR;
             }
-            // idx is 1-indexed element, this set covers it
-            // So matrix[idx-1][j] = 1.0
-            rows_data[idx - 1].push_back(make_pair(j, 1.0));
+            // indices are 1-based in OR-Library files
+            node.hCsrMatInds->push_back(idx - 1);
+            node.hCsrMatVals->push_back(1.0);
         }
-    }
 
-    // Now build CSR format from rows_data, and add slack variables
-    node.hCsrMatOffs->push_back(0);
-    for (i = 0; i < node.nrows; ++i)
-    {
-        // Add entries for this row (element constraint)
-        for (const auto &entry : rows_data[i])
-        {
-            node.hCsrMatInds->push_back(entry.first);
-            node.hCsrMatVals->push_back(entry.second);
-        }
         // Add slack variable entry
         node.hCsrMatInds->push_back(node.ncols + i);
         node.hCsrMatVals->push_back(-1.0);

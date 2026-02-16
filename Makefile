@@ -227,8 +227,8 @@ else
 	@echo "Sample is ready - all dependencies have been met"
 endif
 
-sypha : common main model_reader sypha_environment sypha_node_dense sypha_node_sparse sypha_solver_dense sypha_solver_sparse sypha_solver_utils sypha_test
-	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) bin/common.o bin/main.o bin/model_reader.o bin/sypha_environment.o bin/sypha_node_dense.o bin/sypha_node_sparse.o bin/sypha_solver_dense.o bin/sypha_solver_sparse.o bin/sypha_solver_utils.o bin/sypha_test.o -o $@ $(LIBRARIES)
+sypha : common main model_reader sypha_environment sypha_node_dense sypha_node_sparse sypha_solver sypha_solver_bnb sypha_solver_bnb_driver sypha_solver_heuristics sypha_solver_utils
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) bin/common.o bin/main.o bin/model_reader.o bin/sypha_environment.o bin/sypha_node_dense.o bin/sypha_node_sparse.o bin/sypha_solver.o bin/sypha_solver_bnb.o bin/sypha_solver_bnb_driver.o bin/sypha_solver_heuristics.o bin/sypha_solver_utils.o -o $@ $(LIBRARIES)
 
 common : src/common.cpp
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
@@ -254,22 +254,25 @@ sypha_node_sparse : src/sypha_node_sparse.cpp
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
 	@mv $@.o bin
 
-sypha_solver_dense : src/sypha_solver_dense.cpp
+sypha_solver : src/sypha_solver.cpp
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
 	@mv $@.o bin
 
-sypha_solver_sparse : src/sypha_solver_sparse.cpp
+sypha_solver_bnb : src/sypha_solver_bnb.cpp
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
+	@mv $@.o bin
+
+sypha_solver_bnb_driver : src/sypha_solver_bnb_driver.cpp
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
+	@mv $@.o bin
+
+sypha_solver_heuristics : src/sypha_solver_heuristics.cpp
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
 	@mv $@.o bin
 
 sypha_solver_utils : src/sypha_solver_utils.cu
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cu $(LIBRARIES)
 	@mv $@.o bin
-
-sypha_test : src/sypha_test.cpp
-	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
-	@mv $@.o bin
-
 
 run: build
 	$(EXEC) ./sypha --verbosity 100 --model SCP --input-file data/demo00.txt
