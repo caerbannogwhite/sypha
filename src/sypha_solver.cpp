@@ -197,6 +197,9 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
     int A_ncols = A_nrows;
     int A_nnz = node.nnz * 2 + node.ncols * 3;
     const std::uint64_t denseKktBytes = (std::uint64_t)A_nrows * (std::uint64_t)A_ncols * (std::uint64_t)sizeof(double);
+    const std::uint64_t sparseKktBytes =
+        (std::uint64_t)A_nnz * ((std::uint64_t)sizeof(double) + (std::uint64_t)sizeof(int)) +
+        (std::uint64_t)(A_nrows + 1) * (std::uint64_t)sizeof(int);
     bool useDenseLinearSolve = false;
 
     int *h_csrAInds = NULL;
@@ -295,8 +298,13 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
 
     size_t gpuMemFree = 0;
     size_t gpuMemTotal = 0;
-    if ((node.env->denseGpuMemoryFractionThreshold > 0.0) &&
-        (cudaMemGetInfo(&gpuMemFree, &gpuMemTotal) == cudaSuccess))
+    const bool canTrackGpuMem = (cudaMemGetInfo(&gpuMemFree, &gpuMemTotal) == cudaSuccess);
+    const size_t gpuMemFreeBeforeKktSetup = gpuMemFree;
+    size_t gpuMemFreeAfterKktSetup = gpuMemFree;
+    size_t gpuMemMinDuringLinearSolve = gpuMemFree;
+    int gpuMemSampleCount = 0;
+
+    if ((node.env->denseGpuMemoryFractionThreshold > 0.0) && canTrackGpuMem)
     {
         const double thresholdBytes = node.env->denseGpuMemoryFractionThreshold * (double)gpuMemTotal;
         useDenseLinearSolve = (double)denseKktBytes < thresholdBytes;
@@ -315,8 +323,10 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
                                             node.cusparseHandle, node.cusolverDnHandle);
         if (shouldLogDenseSelection)
         {
-            sprintf(message, "Using dense linear solver (KKT %.2f MB, threshold %.2f MB)",
+            sprintf(message,
+                    "Using dense linear solver (dense KKT %.2f MB, sparse KKT %.2f MB, threshold %.2f MB)",
                     (double)denseKktBytes / (1024.0 * 1024.0),
+                    (double)sparseKktBytes / (1024.0 * 1024.0),
                     (node.env->denseGpuMemoryFractionThreshold * (double)gpuMemTotal) / (1024.0 * 1024.0));
             node.env->logger(message, "INFO", 5);
         }
@@ -325,11 +335,33 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
     {
         if (shouldLogDenseSelection)
         {
-            sprintf(message, "Using sparse linear solver (KKT %.2f MB)",
+            sprintf(message,
+                    "Using sparse linear solver (sparse KKT %.2f MB, dense KKT %.2f MB)",
+                    (double)sparseKktBytes / (1024.0 * 1024.0),
                     (double)denseKktBytes / (1024.0 * 1024.0));
             node.env->logger(message, "INFO", 10);
         }
     }
+
+    auto sampleGpuMemory = [&]() {
+        if (!canTrackGpuMem)
+        {
+            return;
+        }
+        size_t freeNow = 0;
+        size_t totalNow = 0;
+        if (cudaMemGetInfo(&freeNow, &totalNow) == cudaSuccess)
+        {
+            if (freeNow < gpuMemMinDuringLinearSolve)
+            {
+                gpuMemMinDuringLinearSolve = freeNow;
+            }
+            ++gpuMemSampleCount;
+        }
+    };
+
+    sampleGpuMemory();
+    gpuMemFreeAfterKktSetup = gpuMemMinDuringLinearSolve;
 
     free(h_csrAInds);
     free(h_csrAOffs);
@@ -337,7 +369,6 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
 
     ///////////////////             INITIALISE RHS
 
-    node.env->logger("RHS initialised", "INFO", 17);
     checkCudaErrors(cudaMalloc((void **)&d_rhs, sizeof(double) * A_nrows));
     checkCudaErrors(cudaMalloc((void **)&d_sol, sizeof(double) * A_nrows));
     checkCudaErrors(cudaMalloc((void **)&d_prevSol, sizeof(double) * A_nrows));
@@ -449,6 +480,7 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
 
         if (useDenseLinearSolve)
         {
+            sampleGpuMemory();
             if (!solveDenseLinearSystem(&denseLinearWorkspace, d_rhs, d_sol,
                                         node.cusparseHandle, node.cusolverDnHandle, node.cudaStream))
             {
@@ -459,6 +491,7 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         }
         else
         {
+            sampleGpuMemory();
             checkCudaErrors(cusolverSpDcsrlsvqr(node.cusolverSpHandle,
                                                 A_nrows, A_nnz, A_descr,
                                                 d_csrAVals, d_csrAOffs, d_csrAInds,
@@ -466,6 +499,7 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
                                                 node.env->mehrotraCholTol, reorder,
                                                 d_sol, &singularity));
         }
+        sampleGpuMemory();
         if (!useDenseLinearSolve && singularity >= 0)
         {
             infeasibleOrNumerical = true;
@@ -511,6 +545,7 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
 
         if (useDenseLinearSolve)
         {
+            sampleGpuMemory();
             if (!solveDenseLinearSystem(&denseLinearWorkspace, d_rhs, d_sol,
                                         node.cusparseHandle, node.cusolverDnHandle, node.cudaStream))
             {
@@ -521,6 +556,7 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         }
         else
         {
+            sampleGpuMemory();
             checkCudaErrors(cusolverSpDcsrlsvqr(node.cusolverSpHandle,
                                                 A_nrows, A_nnz, A_descr,
                                                 d_csrAVals, d_csrAOffs, d_csrAInds,
@@ -528,6 +564,7 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
                                                 node.env->mehrotraCholTol, reorder,
                                                 d_sol, &singularity));
         }
+        sampleGpuMemory();
         if (!useDenseLinearSolve && singularity >= 0)
         {
             infeasibleOrNumerical = true;
@@ -643,6 +680,22 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
     {
         node.env->logger("LP relaxation flagged as infeasible or numerically unstable", "INFO", 5);
     }
+
+    if (canTrackGpuMem)
+    {
+        const double toMb = 1024.0 * 1024.0;
+        const double freeBeforeMb = (double)gpuMemFreeBeforeKktSetup / toMb;
+        const double freeAfterSetupMb = (double)gpuMemFreeAfterKktSetup / toMb;
+        const double minDuringSolveMb = (double)gpuMemMinDuringLinearSolve / toMb;
+        const double setupUsedMb = (double)(gpuMemFreeBeforeKktSetup >= gpuMemFreeAfterKktSetup ? (gpuMemFreeBeforeKktSetup - gpuMemFreeAfterKktSetup) : 0) / toMb;
+        const double extraPeakMb = (double)(gpuMemFreeAfterKktSetup >= gpuMemMinDuringLinearSolve ? (gpuMemFreeAfterKktSetup - gpuMemMinDuringLinearSolve) : 0) / toMb;
+        sprintf(message,
+                "GPU memory telemetry (%s): free before KKT %.2f MB, free after setup %.2f MB, min free during solves %.2f MB, setup used %.2f MB, extra solve peak %.2f MB, samples %d",
+                useDenseLinearSolve ? "dense" : "sparse",
+                freeBeforeMb, freeAfterSetupMb, minDuringSolveMb, setupUsedMb, extraPeakMb, gpuMemSampleCount);
+        node.env->logger(message, "INFO", 8);
+    }
+
     node.env->logger("Mehrotra procedure finished", "INFO", 10);
     node.timeSolverEnd = node.env->timer();
 
@@ -770,7 +823,6 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
 
     ///////////////////             INITIALISE RHS
 
-    node.env->logger("RHS initialised", "INFO", 17);
     node.timePreSolStart = node.env->timer();
 
     checkCudaErrors(cudaMalloc((void **)&d_x, sizeof(double) * node.ncols));
