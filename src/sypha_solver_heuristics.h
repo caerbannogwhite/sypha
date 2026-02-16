@@ -22,13 +22,15 @@ struct BaseRelaxationModel
 {
     int nrows = 0;
     int ncols = 0;
-    int ncolsOriginal = 0;
+    int ncolsOriginal = 0;      // Active original columns after preprocessing
+    int ncolsInputOriginal = 0; // Original columns in input instance
     int nnz = 0;
     std::vector<int> csrInds;
     std::vector<int> csrOffs;
     std::vector<double> csrVals;
     std::vector<double> obj;
     std::vector<double> rhs;
+    std::vector<int> activeToOriginalCol;
 };
 
 struct IntegerHeuristicResult

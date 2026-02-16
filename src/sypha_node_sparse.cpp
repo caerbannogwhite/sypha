@@ -1,5 +1,6 @@
 
 #include "sypha_node_sparse.h"
+#include "sypha_preprocessor.h"
 
 SyphaCOOEntry::SyphaCOOEntry(int r, int c, double v)
 {
@@ -15,6 +16,7 @@ SyphaNodeSparse::SyphaNodeSparse(SyphaEnvironment &env)
     this->ncols = 0;
     this->nrows = 0;
     this->ncolsOriginal = 0;
+    this->ncolsInputOriginal = 0;
     this->nnz = 0;
     this->objvalPrim = 0.0;
     this->objvalDual = 0.0;
@@ -25,6 +27,7 @@ SyphaNodeSparse::SyphaNodeSparse(SyphaEnvironment &env)
     this->hCsrMatInds = new std::vector<int>();
     this->hCsrMatOffs = new std::vector<int>();
     this->hCsrMatVals = new std::vector<double>();
+    this->hActiveToInputCols = new std::vector<int>();
 
     hObjDns = NULL;
     hRhsDns = NULL;
@@ -73,6 +76,8 @@ SyphaNodeSparse::~SyphaNodeSparse()
         this->hCsrMatOffs->clear();
     if (this->hCsrMatVals)
         this->hCsrMatVals->clear();
+    if (this->hActiveToInputCols)
+        this->hActiveToInputCols->clear();
 
     if (this->hObjDns)
         free(this->hObjDns);
@@ -219,6 +224,169 @@ SyphaStatus SyphaNodeSparse::copyModelOnDevice()
 
     checkCudaErrors(cusparseCreateDnVec(&this->rhsDescr, (int64_t)this->nrows,
                                         this->hRhsDns, CUDA_R_64F));
+
+    return CODE_SUCCESFULL;
+}
+
+SyphaStatus SyphaNodeSparse::preprocessModel(double incumbentUpperBound)
+{
+    if (this->nrows <= 0 || this->ncolsOriginal <= 0 || !this->hObjDns || !this->hCsrMatInds || !this->hCsrMatOffs || !this->hCsrMatVals)
+    {
+        return CODE_SUCCESFULL;
+    }
+
+    if (this->ncolsInputOriginal <= 0)
+    {
+        this->ncolsInputOriginal = this->ncolsOriginal;
+    }
+    if (!this->hActiveToInputCols)
+    {
+        this->hActiveToInputCols = new std::vector<int>();
+    }
+    if (this->hActiveToInputCols->empty())
+    {
+        this->hActiveToInputCols->resize((size_t)this->ncolsOriginal);
+        for (int j = 0; j < this->ncolsOriginal; ++j)
+        {
+            (*this->hActiveToInputCols)[(size_t)j] = j;
+        }
+    }
+
+    ColumnPreprocessContext ctx;
+    ctx.nrows = this->nrows;
+    ctx.ncols = this->ncolsOriginal;
+    ctx.rowsByColumn.assign((size_t)ctx.ncols, std::vector<int>());
+    ctx.costs.assign(this->hObjDns, this->hObjDns + this->ncolsOriginal);
+    ctx.active.assign((size_t)ctx.ncols, 1);
+
+    for (int i = 0; i < this->nrows; ++i)
+    {
+        const int begin = (*this->hCsrMatOffs)[(size_t)i];
+        const int end = (*this->hCsrMatOffs)[(size_t)i + 1];
+        for (int k = begin; k < end; ++k)
+        {
+            const int col = (*this->hCsrMatInds)[(size_t)k];
+            const double val = (*this->hCsrMatVals)[(size_t)k];
+            if (col >= 0 && col < this->ncolsOriginal && val > this->env->pxTolerance)
+            {
+                ctx.rowsByColumn[(size_t)col].push_back(i);
+            }
+        }
+    }
+
+    int removedByIncumbent = 0;
+    if (std::isfinite(incumbentUpperBound))
+    {
+        for (int oldCol = 0; oldCol < ctx.ncols; ++oldCol)
+        {
+            if (!ctx.active[(size_t)oldCol])
+            {
+                continue;
+            }
+            if (ctx.costs[(size_t)oldCol] + this->env->pxTolerance >= incumbentUpperBound)
+            {
+                ctx.active[(size_t)oldCol] = 0;
+                ++removedByIncumbent;
+            }
+        }
+    }
+
+    std::vector<std::unique_ptr<IColumnPreprocessRule>> rules = makeColumnPreprocessRules(this->env->preprocessColumnStrategies);
+    int removedByRules = 0;
+    for (const std::unique_ptr<IColumnPreprocessRule> &rule : rules)
+    {
+        removedByRules += rule->apply(ctx, this->env->pxTolerance);
+    }
+
+    std::vector<int> newActiveToInput;
+    std::vector<int> newToOld;
+    newActiveToInput.reserve((size_t)ctx.ncols);
+    newToOld.reserve((size_t)ctx.ncols);
+    std::vector<int> oldToNew((size_t)ctx.ncols, -1);
+    for (int oldCol = 0; oldCol < ctx.ncols; ++oldCol)
+    {
+        if (!ctx.active[(size_t)oldCol])
+        {
+            continue;
+        }
+        const int newCol = (int)newActiveToInput.size();
+        oldToNew[(size_t)oldCol] = newCol;
+        newActiveToInput.push_back((*this->hActiveToInputCols)[(size_t)oldCol]);
+        newToOld.push_back(oldCol);
+    }
+
+    if (newActiveToInput.empty())
+    {
+        this->env->logger("Preprocessing removed all original columns; keeping original model", "INFO", 5);
+        return CODE_SUCCESFULL;
+    }
+
+    const int removedColumns = removedByIncumbent + removedByRules;
+    if (removedColumns <= 0)
+    {
+        return CODE_SUCCESFULL;
+    }
+
+    const int newOriginalCols = (int)newActiveToInput.size();
+    std::vector<int> newCsrInds;
+    std::vector<int> newCsrOffs;
+    std::vector<double> newCsrVals;
+    std::vector<double> newObj((size_t)(newOriginalCols + this->nrows), 0.0);
+
+    newCsrOffs.reserve((size_t)this->nrows + 1);
+    newCsrOffs.push_back(0);
+
+    for (int newCol = 0; newCol < newOriginalCols; ++newCol)
+    {
+        const int oldCol = newToOld[(size_t)newCol];
+        newObj[(size_t)newCol] = ctx.costs[(size_t)oldCol];
+    }
+
+    for (int i = 0; i < this->nrows; ++i)
+    {
+        const int begin = (*this->hCsrMatOffs)[(size_t)i];
+        const int end = (*this->hCsrMatOffs)[(size_t)i + 1];
+        for (int k = begin; k < end; ++k)
+        {
+            const int oldCol = (*this->hCsrMatInds)[(size_t)k];
+            const double val = (*this->hCsrMatVals)[(size_t)k];
+            if (oldCol >= 0 && oldCol < this->ncolsOriginal)
+            {
+                const int mapped = oldToNew[(size_t)oldCol];
+                if (mapped >= 0)
+                {
+                    newCsrInds.push_back(mapped);
+                    newCsrVals.push_back(val);
+                }
+                continue;
+            }
+
+            if (oldCol == this->ncolsOriginal + i)
+            {
+                newCsrInds.push_back(newOriginalCols + i);
+                newCsrVals.push_back(val);
+            }
+        }
+        newCsrOffs.push_back((int)newCsrVals.size());
+    }
+
+    free(this->hObjDns);
+    this->hObjDns = (double *)calloc((size_t)(newOriginalCols + this->nrows), sizeof(double));
+    memcpy(this->hObjDns, newObj.data(), sizeof(double) * (size_t)(newOriginalCols + this->nrows));
+
+    *this->hCsrMatInds = newCsrInds;
+    *this->hCsrMatOffs = newCsrOffs;
+    *this->hCsrMatVals = newCsrVals;
+    *this->hActiveToInputCols = newActiveToInput;
+
+    this->ncolsOriginal = newOriginalCols;
+    this->ncols = newOriginalCols + this->nrows;
+    this->nnz = (int)newCsrVals.size();
+
+    char message[256];
+    sprintf(message, "Preprocessing removed %d columns (%d by incumbent, %d by rules), remaining %d/%d",
+            removedColumns, removedByIncumbent, removedByRules, this->ncolsOriginal, this->ncolsInputOriginal);
+    this->env->logger(message, "INFO", 5);
 
     return CODE_SUCCESFULL;
 }

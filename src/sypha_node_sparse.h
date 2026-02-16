@@ -29,7 +29,8 @@ class SyphaNodeSparse
 private:
     int ncols;
     int nrows;
-    int ncolsOriginal;  // Original columns (before adding slack variables)
+    int ncolsOriginal;      // Active original columns (before adding branch slacks)
+    int ncolsInputOriginal; // Original columns from input instance before preprocessing
     int nnz;
     double objvalPrim;
     double objvalDual;
@@ -40,6 +41,7 @@ private:
     vector<int> *hCsrMatInds;
     vector<int> *hCsrMatOffs;
     vector<double> *hCsrMatVals;
+    vector<int> *hActiveToInputCols; // active original col index -> input original col index
     double *hObjDns;
     double *hRhsDns;
     double *hX;
@@ -97,6 +99,7 @@ public:
     double getTimeSolver();
     SyphaStatus solve();
     SyphaStatus readModel();
+    SyphaStatus preprocessModel(double incumbentUpperBound = std::numeric_limits<double>::infinity());
     SyphaStatus copyModelOnDevice();
     SyphaStatus setInitValues();
     SyphaStatus setUpCuda();

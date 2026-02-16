@@ -5,6 +5,7 @@
 
 #include "sypha_cuda_helper.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -16,20 +17,119 @@
 
 SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
 {
-    BaseRelaxationModel base;
-    base.nrows = node.nrows;
-    base.ncols = node.ncols;
-    base.ncolsOriginal = node.ncolsOriginal;
-    base.nnz = node.nnz;
-    base.csrInds = *node.hCsrMatInds;
-    base.csrOffs = *node.hCsrMatOffs;
-    base.csrVals = *node.hCsrMatVals;
-    base.obj.assign(node.hObjDns, node.hObjDns + node.ncols);
-    base.rhs.assign(node.hRhsDns, node.hRhsDns + node.nrows);
+    char message[1024];
+    auto buildBaseModel = [&](BaseRelaxationModel *base) {
+        base->nrows = node.nrows;
+        base->ncols = node.ncols;
+        base->ncolsOriginal = node.ncolsOriginal;
+        base->ncolsInputOriginal = node.ncolsInputOriginal > 0 ? node.ncolsInputOriginal : node.ncolsOriginal;
+        base->nnz = node.nnz;
+        base->csrInds = *node.hCsrMatInds;
+        base->csrOffs = *node.hCsrMatOffs;
+        base->csrVals = *node.hCsrMatVals;
+        base->obj.assign(node.hObjDns, node.hObjDns + node.ncols);
+        base->rhs.assign(node.hRhsDns, node.hRhsDns + node.nrows);
+        if (node.hActiveToInputCols && !node.hActiveToInputCols->empty())
+        {
+            base->activeToOriginalCol = *node.hActiveToInputCols;
+        }
+        else
+        {
+            base->activeToOriginalCol.resize((size_t)base->ncolsOriginal);
+            for (int j = 0; j < base->ncolsOriginal; ++j)
+            {
+                base->activeToOriginalCol[(size_t)j] = j;
+            }
+        }
+    };
 
-    std::unique_ptr<IBranchVariableSelector> selector = makeBranchSelector(node.env->bnbVarSelectionStrategy);
+    const int originalRowsForPreprocess = node.nrows;
+    const int originalColsForPreprocess = node.ncolsOriginal;
+    const int originalNnzForPreprocess = node.nnz;
+
     std::vector<std::unique_ptr<IIntegerHeuristic>> heuristics = makeIntegerHeuristics(node.env->bnbIntHeuristics);
     const int heuristicFrequency = node.env->bnbHeuristicEveryNNodes > 0 ? node.env->bnbHeuristicEveryNNodes : 10;
+    const double integralityTol = node.env->bnbIntegralityTol;
+
+    double bestIntegerObj = std::numeric_limits<double>::infinity();
+    std::vector<double> bestIntegerSolution;
+    std::string incumbentSource = "none";
+    double globalRelaxLowerBound = std::numeric_limits<double>::infinity();
+
+    node.env->logger("BnB preprocessing: solving root LP relaxation", "INFO", 5);
+    SolverExecutionConfig presolveConfig;
+    presolveConfig.maxIterations = node.env->mehrotraMaxIter;
+    presolveConfig.gapStagnation.enabled = false;
+    presolveConfig.bnbNodeOrdinal = 0;
+    presolveConfig.denseSelectionLogEveryNodes = 10;
+
+    SolverExecutionResult presolveResult;
+    const SyphaStatus presolveStatus = solver_sparse_mehrotra_run(node, presolveConfig, &presolveResult);
+    if ((presolveStatus == CODE_SUCCESFULL) && (presolveResult.status == CODE_SUCCESFULL))
+    {
+        BaseRelaxationModel rootBase;
+        buildBaseModel(&rootBase);
+        BranchNodeState rootNode;
+        for (const auto &heuristic : heuristics)
+        {
+            IntegerHeuristicResult heuristicRes = heuristic->tryBuild(
+                presolveResult.primalSolution, presolveResult.dualSolution, rootBase, rootNode, integralityTol);
+            if (heuristicRes.feasible && heuristicRes.objective < bestIntegerObj - node.env->pxTolerance)
+            {
+                bestIntegerObj = heuristicRes.objective;
+                bestIntegerSolution = heuristicRes.solution;
+                incumbentSource = std::string("presolve_") + heuristicRes.name;
+            }
+        }
+
+        if (((int)presolveResult.primalSolution.size() >= rootBase.ncolsOriginal) &&
+            is_binary_integral_solution(presolveResult.primalSolution, rootBase.ncolsOriginal, integralityTol) &&
+            (presolveResult.primalObj < bestIntegerObj - node.env->pxTolerance))
+        {
+            bestIntegerObj = presolveResult.primalObj;
+            bestIntegerSolution.assign(presolveResult.primalSolution.begin(),
+                                       presolveResult.primalSolution.begin() + rootBase.ncolsOriginal);
+            incumbentSource = "presolve_exact_root_lp";
+        }
+
+        const bool dualBoundConsistent =
+            std::isfinite(presolveResult.dualObj) &&
+            std::isfinite(presolveResult.primalObj) &&
+            (presolveResult.dualObj <= presolveResult.primalObj + node.env->pxTolerance);
+        if ((presolveResult.terminationReason == SOLVER_TERM_CONVERGED) && dualBoundConsistent)
+        {
+            globalRelaxLowerBound = std::min(globalRelaxLowerBound, presolveResult.dualObj);
+        }
+    }
+    else
+    {
+        node.env->logger("BnB preprocessing: root LP did not converge, continuing without incumbent bound", "INFO", 5);
+    }
+
+    const SyphaStatus preprocessStatus = node.preprocessModel(bestIntegerObj);
+    if (preprocessStatus != CODE_SUCCESFULL)
+    {
+        return preprocessStatus;
+    }
+    sprintf(message,
+            "Preprocessing size: original rows=%d cols=%d nnz=%d -> preprocessed rows=%d cols=%d nnz=%d",
+            originalRowsForPreprocess, originalColsForPreprocess, originalNnzForPreprocess,
+            node.nrows, node.ncolsOriginal, node.nnz);
+    node.env->logger(message, "INFO", 5);
+    if (std::isfinite(bestIntegerObj))
+    {
+        sprintf(message, "Preprocessing incumbent from %s: %.12g", incumbentSource.c_str(), bestIntegerObj);
+        node.env->logger(message, "INFO", 5);
+    }
+
+    if (node.copyModelOnDevice() != CODE_SUCCESFULL)
+    {
+        return CODE_GENERIC_ERROR;
+    }
+
+    BaseRelaxationModel base;
+    buildBaseModel(&base);
+    std::unique_ptr<IBranchVariableSelector> selector = makeBranchSelector(node.env->bnbVarSelectionStrategy);
 
     // Keep the original LP matrix resident on the device for the whole BnB run.
     int *d_baseInds = NULL;
@@ -53,15 +153,8 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
 
     DeviceNodeWindow deviceWindow(node.env->bnbDeviceQueueCapacity);
 
-    const double integralityTol = node.env->bnbIntegralityTol;
-    double bestIntegerObj = std::numeric_limits<double>::infinity();
-    double globalRelaxLowerBound = std::numeric_limits<double>::infinity();
-    std::vector<double> bestIntegerSolution;
-    std::string incumbentSource = "none";
-
     int processedNodes = 0;
     int totalLpIterations = 0;
-    char message[1024];
     node.env->logger("Branch-and-bound started", "INFO", 5);
     node.timeSolverStart = node.env->timer();
     const double bnbStartMs = node.timeSolverStart;
@@ -304,8 +397,16 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             free(node.hX);
             node.hX = NULL;
         }
-        node.hX = (double *)calloc((size_t)base.ncolsOriginal, sizeof(double));
-        memcpy(node.hX, bestIntegerSolution.data(), sizeof(double) * (size_t)base.ncolsOriginal);
+        node.hX = (double *)calloc((size_t)base.ncolsInputOriginal, sizeof(double));
+        const int copyCols = std::min(base.ncolsOriginal, (int)bestIntegerSolution.size());
+        for (int j = 0; j < copyCols; ++j)
+        {
+            const int origCol = base.activeToOriginalCol[(size_t)j];
+            if (origCol >= 0 && origCol < base.ncolsInputOriginal)
+            {
+                node.hX[(size_t)origCol] = bestIntegerSolution[(size_t)j];
+            }
+        }
     }
     else
     {
@@ -338,11 +439,13 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         {
             sprintf(message, "  Source: %s", incumbentSource.c_str());
             node.env->logger(message, "INFO", 5);
-            for (int j = 0; j < base.ncolsOriginal; ++j)
+            const int logCols = std::min(base.ncolsOriginal, (int)bestIntegerSolution.size());
+            for (int j = 0; j < logCols; ++j)
             {
                 if (bestIntegerSolution[(size_t)j] > 0.5)
                 {
-                    sprintf(message, "  x[%d] = %.0f", j, bestIntegerSolution[(size_t)j]);
+                    const int origCol = base.activeToOriginalCol[(size_t)j];
+                    sprintf(message, "  x[%d] = %.0f", origCol, bestIntegerSolution[(size_t)j]);
                     node.env->logger(message, "INFO", 5);
                 }
             }

@@ -49,6 +49,7 @@ SyphaStatus SyphaEnvironment::setDefaultParameters()
     this->bnbDisable = sypha_environment_defaults::kBnbDisable;
     this->bnbAutoFallbackLp = sypha_environment_defaults::kBnbAutoFallbackLp;
     this->showSolution = sypha_environment_defaults::kShowSolution;
+    this->preprocessColumnStrategies = sypha_environment_defaults::kPreprocessColumnStrategies();
 
     return CODE_SUCCESFULL;
 }
@@ -69,7 +70,35 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
     try
     {
         po::options_description desc("Allowed options");
-        desc.add_options()("help", "produce help message")("unit-tests", po::value<string>(&this->test)->default_value("none"), "launch unit tests")("unit-tests-rep", po::value<int>(&this->testRepeat)->default_value(1), "set number of repeats for each test")("input-file", po::value<string>(&this->inputFilePath), "set input file path")("model", po::value<string>(&modelType), "set input model type (scp)")("sparse", po::value<bool>(&this->sparse)->default_value(true), "import model as sparse model")("time-limit", po::value<double>(&this->timeLimit), "set time limit")("seed", po::value<int>(&this->seed), "set random seed")("thread", po::value<int>(&this->threadNum), "set number of thread")("tol", po::value<double>(&this->pxTolerance)->default_value(1e-8), "set tolerance")("verbosity", po::value<int>(&this->verbosityLevel)->default_value(5), "set verbosity level")("debug", po::value<int>(&this->debugLevel)->default_value(0), "set debug level")("show-solution", po::bool_switch(&this->showSolution)->default_value(sypha_environment_defaults::kShowSolution), "show final solution summary")("mehrotra-max-iter", po::value<int>(&this->mehrotraMaxIter)->default_value(sypha_environment_defaults::kMehrotraMaxIter), "set max iterations for Mehrotra IPM")("dense-memory-threshold", po::value<double>(&this->denseGpuMemoryFractionThreshold)->default_value(sypha_environment_defaults::kDenseGpuMemoryFractionThreshold), "use dense KKT solver when dense matrix bytes < this fraction of total GPU memory")("disable-bnb", po::bool_switch(&this->bnbDisable)->default_value(sypha_environment_defaults::kBnbDisable), "disable branch-and-bound and solve LP relaxation only")("bnb-auto-fallback-lp", po::value<bool>(&this->bnbAutoFallbackLp)->default_value(sypha_environment_defaults::kBnbAutoFallbackLp), "fallback to LP relaxation if BnB finds no incumbent within limits")("bnb-max-nodes", po::value<int>(&this->bnbMaxNodes)->default_value(sypha_environment_defaults::kBnbMaxNodes), "set max number of BnB nodes to process")("bnb-device-queue", po::value<int>(&this->bnbDeviceQueueCapacity)->default_value(sypha_environment_defaults::kBnbDeviceQueueCapacity), "set active BnB node queue capacity on device")("bnb-gap-stall-iters", po::value<int>(&this->bnbGapStallBranchIters)->default_value(sypha_environment_defaults::kBnbGapStallBranchIters), "branch if primal/dual gap does not improve for this many iterations")("bnb-gap-stall-pct", po::value<double>(&this->bnbGapStallMinImprovPct)->default_value(sypha_environment_defaults::kBnbGapStallMinImprovPct), "minimum gap improvement percentage to reset stall counter")("bnb-int-tol", po::value<double>(&this->bnbIntegralityTol)->default_value(sypha_environment_defaults::kBnbIntegralityTol), "integrality tolerance for BnB")("bnb-var-select", po::value<string>(&this->bnbVarSelectionStrategy)->default_value(sypha_environment_defaults::kBnbVarSelectionStrategy()), "variable selection strategy: most_fractional|highest_cost_fractional")("bnb-int-heur-every", po::value<int>(&this->bnbHeuristicEveryNNodes)->default_value(sypha_environment_defaults::kBnbHeuristicEveryNNodes), "run integer heuristics every n BnB nodes")("bnb-int-heuristics", po::value<string>(&this->bnbIntHeuristics)->default_value(sypha_environment_defaults::kBnbIntHeuristics()), "comma-separated integer heuristics")("bnb-log-interval-sec", po::value<double>(&this->bnbLogIntervalSeconds)->default_value(sypha_environment_defaults::kBnbLogIntervalSeconds), "seconds between branch-and-bound progress logs (<=0 disables)")("bnb-hard-time-limit-sec", po::value<double>(&this->bnbHardTimeLimitSeconds)->default_value(sypha_environment_defaults::kBnbHardTimeLimitSeconds), "hard time limit for branch-and-bound in seconds (<=0 disables)");
+        desc.add_options()
+            ("help", "produce help message")
+            ("unit-tests", po::value<string>(&this->test)->default_value("none"), "launch unit tests")
+            ("unit-tests-rep", po::value<int>(&this->testRepeat)->default_value(1), "set number of repeats for each test")
+            ("input-file", po::value<string>(&this->inputFilePath), "set input file path")
+            ("model", po::value<string>(&modelType), "set input model type (scp)")
+            ("sparse", po::value<bool>(&this->sparse)->default_value(true), "import model as sparse model")
+            ("time-limit", po::value<double>(&this->timeLimit), "set time limit")
+            ("seed", po::value<int>(&this->seed), "set random seed")
+            ("thread", po::value<int>(&this->threadNum), "set number of thread")
+            ("tol", po::value<double>(&this->pxTolerance)->default_value(1e-8), "set tolerance")
+            ("verbosity", po::value<int>(&this->verbosityLevel)->default_value(5), "set verbosity level")
+            ("debug", po::value<int>(&this->debugLevel)->default_value(0), "set debug level")
+            ("show-solution", po::bool_switch(&this->showSolution)->default_value(sypha_environment_defaults::kShowSolution), "show final solution summary")
+            ("mehrotra-max-iter", po::value<int>(&this->mehrotraMaxIter)->default_value(sypha_environment_defaults::kMehrotraMaxIter), "set max iterations for Mehrotra IPM")
+            ("dense-memory-threshold", po::value<double>(&this->denseGpuMemoryFractionThreshold)->default_value(sypha_environment_defaults::kDenseGpuMemoryFractionThreshold), "use dense KKT solver when dense matrix bytes < this fraction of total GPU memory")
+            ("disable-bnb", po::bool_switch(&this->bnbDisable)->default_value(sypha_environment_defaults::kBnbDisable), "disable branch-and-bound and solve LP relaxation only")
+            ("bnb-auto-fallback-lp", po::value<bool>(&this->bnbAutoFallbackLp)->default_value(sypha_environment_defaults::kBnbAutoFallbackLp), "fallback to LP relaxation if BnB finds no incumbent within limits")
+            ("bnb-max-nodes", po::value<int>(&this->bnbMaxNodes)->default_value(sypha_environment_defaults::kBnbMaxNodes), "set max number of BnB nodes to process")
+            ("bnb-device-queue", po::value<int>(&this->bnbDeviceQueueCapacity)->default_value(sypha_environment_defaults::kBnbDeviceQueueCapacity), "set active BnB node queue capacity on device")
+            ("bnb-gap-stall-iters", po::value<int>(&this->bnbGapStallBranchIters)->default_value(sypha_environment_defaults::kBnbGapStallBranchIters), "branch if primal/dual gap does not improve for this many iterations")
+            ("bnb-gap-stall-pct", po::value<double>(&this->bnbGapStallMinImprovPct)->default_value(sypha_environment_defaults::kBnbGapStallMinImprovPct), "minimum gap improvement percentage to reset stall counter")
+            ("bnb-int-tol", po::value<double>(&this->bnbIntegralityTol)->default_value(sypha_environment_defaults::kBnbIntegralityTol), "integrality tolerance for BnB")
+            ("bnb-var-select", po::value<string>(&this->bnbVarSelectionStrategy)->default_value(sypha_environment_defaults::kBnbVarSelectionStrategy()), "variable selection strategy: most_fractional|highest_cost_fractional")
+            ("bnb-int-heur-every", po::value<int>(&this->bnbHeuristicEveryNNodes)->default_value(sypha_environment_defaults::kBnbHeuristicEveryNNodes), "run integer heuristics every n BnB nodes")
+            ("bnb-int-heuristics", po::value<string>(&this->bnbIntHeuristics)->default_value(sypha_environment_defaults::kBnbIntHeuristics()), "comma-separated integer heuristics")
+            ("bnb-log-interval-sec", po::value<double>(&this->bnbLogIntervalSeconds)->default_value(sypha_environment_defaults::kBnbLogIntervalSeconds), "seconds between branch-and-bound progress logs (<=0 disables)")
+            ("bnb-hard-time-limit-sec", po::value<double>(&this->bnbHardTimeLimitSeconds)->default_value(sypha_environment_defaults::kBnbHardTimeLimitSeconds), "hard time limit for branch-and-bound in seconds (<=0 disables)")
+            ("preprocess-columns", po::value<string>(&this->preprocessColumnStrategies)->default_value(sypha_environment_defaults::kPreprocessColumnStrategies()), "comma-separated preprocessing rules: single_column_dominance,two_column_dominance,none");
 
         po::variables_map vm;
         po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -180,6 +209,10 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         if (vm.count("bnb-hard-time-limit-sec"))
         {
             cout << "BnB hard time limit set to " << vm["bnb-hard-time-limit-sec"].as<double>() << " seconds.\n";
+        }
+        if (vm.count("preprocess-columns"))
+        {
+            cout << "Preprocess column strategies set to " << vm["preprocess-columns"].as<string>() << ".\n";
         }
         cout << "BnB disabled set to " << (this->bnbDisable ? "true" : "false") << ".\n";
         cout << "BnB auto fallback to LP set to " << (this->bnbAutoFallbackLp ? "true" : "false") << ".\n";

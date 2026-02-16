@@ -155,6 +155,13 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
 
     node.nnz = node.hCooMat->size();
     node.ncolsOriginal = node.ncols; // Save original column count before adding slacks
+    node.ncolsInputOriginal = node.ncolsOriginal;
+    node.hActiveToInputCols->clear();
+    node.hActiveToInputCols->reserve((size_t)node.ncolsOriginal);
+    for (int col = 0; col < node.ncolsOriginal; ++col)
+    {
+        node.hActiveToInputCols->push_back(col);
+    }
     node.ncols = node.ncols + node.nrows;
 
     sprintf(message, "Model: SCP (sparse COO), %d non-zeros", (node.nnz - node.nrows));
@@ -247,6 +254,13 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
 
     node.nnz = node.hCsrMatVals->size();
     node.ncolsOriginal = node.ncols; // Save original column count before adding slacks
+    node.ncolsInputOriginal = node.ncolsOriginal;
+    node.hActiveToInputCols->clear();
+    node.hActiveToInputCols->reserve((size_t)node.ncolsOriginal);
+    for (int col = 0; col < node.ncolsOriginal; ++col)
+    {
+        node.hActiveToInputCols->push_back(col);
+    }
     node.ncols = node.ncols + node.nrows;
 
     sprintf(message, "Model: SCP (sparse CSR), %d non-zeros", (node.nnz - node.nrows));

@@ -41,6 +41,12 @@ inline const std::string &kBnbIntHeuristics()
     static const std::string value = "nearest_integer_fixing,dual_guided_cover_repair";
     return value;
 }
+
+inline const std::string &kPreprocessColumnStrategies()
+{
+    static const std::string value = "single_column_dominance,two_column_dominance";
+    return value;
+}
 } // namespace sypha_environment_defaults
 
 #endif // SYPHA_ENVIRONMENT_DEFAULTS_H

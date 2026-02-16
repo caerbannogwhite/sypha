@@ -55,6 +55,7 @@ private:
     bool bnbDisable;
     bool bnbAutoFallbackLp;
     bool showSolution;
+    string preprocessColumnStrategies;
 
 public:
     SyphaEnvironment();

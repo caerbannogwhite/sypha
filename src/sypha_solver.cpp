@@ -1068,7 +1068,6 @@ SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node)
     void *d_buffer = NULL;
     size_t currBufferSize = 0;
     size_t bufferSize = 0;
-    char message[1024];
 
     cusolverDnParams_t cusolverDnParams;
     cusparseDnVecDescr_t vecX, vecY, vecS;
@@ -1137,7 +1136,6 @@ SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node)
     ///////////////////             COMPUTE AAT INVERSE MATRIX
 
     // GEMM Computation: MATRIX * MATRIX'
-    node.env->logger("Init: A * A'", "INFO", 20);
 
     checkCudaErrors(cusparseSpMM(node.cusparseHandle,
                                  CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -1150,7 +1148,6 @@ SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node)
 
     ///////////////////             MATRIX INVERSION
 
-    node.env->logger("Init: inv(A*A')", "INFO", 20);
     // See https://stackoverflow.com/questions/50892906/what-is-the-most-efficient-way-to-compute-the-inverse-of-a-general-matrix-using
     checkCudaErrors(cusolverDnDgetrf_bufferSize(node.cusolverDnHandle,
                                                 node.nrows, node.nrows,
@@ -1164,9 +1161,6 @@ SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node)
         checkCudaErrors(cudaMalloc((void **)&d_buffer, currBufferSize));
     }
     checkCudaErrors(cudaMalloc((void **)&d_ipiv, sizeof(int) * node.nrows));
-
-    sprintf(message, "Init: getrf returned %d", info);
-    node.env->logger(message, "INFO", 20);
 
     // set I matrix
     h_I = (double *)calloc(node.nrows * node.nrows, sizeof(double));
@@ -1185,11 +1179,7 @@ SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node)
                                      (double *)d_buffer, node.nrows,
                                      &info));
 
-    sprintf(message, "Init: getrs returned %d", info);
-    node.env->logger(message, "INFO", 20);
-
     ///////////////////             COMPUTE s = - mat' * y + obj
-    node.env->logger("Init: s = -A'*y + obj", "INFO", 20);
     alpha = -1.0;
     beta = 1.0;
 
@@ -1242,7 +1232,6 @@ SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node)
     int i, j;
     int signum = 0;
     double deltaX, deltaS, prod, sumX, sumS;
-    char message[1024];
 
     gsl_vector *x = NULL;
     gsl_vector *y = NULL;
@@ -1270,7 +1259,6 @@ SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node)
     }
 
     ///////////////////             MATRIX MULT
-    node.env->logger("Init: A * A'", "INFO", 20);
     mat->size1 = node.nrows;
     mat->size2 = node.ncols;
     mat->tda = node.ncols;
@@ -1280,7 +1268,6 @@ SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node)
     gsl_blas_dgemm(CblasNoTrans, CblasTrans, 1.0, mat, mat, 0.0, tmp);
 
     ///////////////////             MATRIX INVERSION
-    node.env->logger("Init: inv(A*A')", "INFO", 20);
 
     inv->size1 = node.nrows;
     inv->size2 = node.nrows;
@@ -1289,7 +1276,6 @@ SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node)
     gsl_linalg_LU_invert(tmp, perm, inv);
 
     ///////////////////             COMPUTE x = mat' * AAT_inv * rhs
-    node.env->logger("Init: x = A'*inv(AAT)*rhs", "INFO", 20);
 
     tmp->size1 = node.ncols;
     tmp->size2 = node.nrows;
@@ -1301,7 +1287,6 @@ SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node)
     gsl_blas_dgemv(CblasNoTrans, 1.0, tmp, y, 0.0, x);
 
     ///////////////////             COMPUTE y = AAT_inv * mat * obj
-    node.env->logger("Init: y = inv(AAT)*A*obj", "INFO", 20);
 
     tmp->size1 = node.nrows;
     tmp->size2 = node.ncols;
@@ -1314,7 +1299,6 @@ SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node)
     gsl_blas_dgemv(CblasNoTrans, 1.0, tmp, s, 0.0, y);
 
     ///////////////////             COMPUTE s = - mat' * y + obj
-    node.env->logger("Init: s = obj - A'*y", "INFO", 20);
     gsl_blas_dgemv(CblasTrans, -1.0, mat, y, 1.0, s);
 
     deltaX = gsl_max(-1.5 * gsl_vector_min(x), 0.0);
