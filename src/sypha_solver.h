@@ -42,4 +42,14 @@ bool solveDenseLinearSystem(DenseLinearSolveWorkspace *workspace,
                             cusolverDnHandle_t cusolverDnHandle,
                             cudaStream_t cudaStream);
 
+bool factorizeDenseLinearSystem(DenseLinearSolveWorkspace *workspace,
+                                cusparseHandle_t cusparseHandle,
+                                cusolverDnHandle_t cusolverDnHandle);
+
+bool solveDenseLinearSystemFactored(DenseLinearSolveWorkspace *workspace,
+                                     const double *dRhs,
+                                     double *dSolution,
+                                     cusolverDnHandle_t cusolverDnHandle,
+                                     cudaStream_t cudaStream);
+
 #endif // SYPHA_SOLVER_H

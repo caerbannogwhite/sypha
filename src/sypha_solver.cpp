@@ -114,6 +114,39 @@ bool solveDenseLinearSystem(DenseLinearSolveWorkspace *workspace,
     return info == 0;
 }
 
+bool factorizeDenseLinearSystem(DenseLinearSolveWorkspace *workspace,
+                                cusparseHandle_t cusparseHandle,
+                                cusolverDnHandle_t cusolverDnHandle)
+{
+    int info = 0;
+    checkCudaErrors(cusparseSparseToDense(cusparseHandle, workspace->sparseMatrix, workspace->denseMatrix,
+                                          CUSPARSE_SPARSETODENSE_ALG_DEFAULT, workspace->dSparseToDenseBuffer));
+    checkCudaErrors(cusolverDnDgetrf(cusolverDnHandle,
+                                     workspace->nRows, workspace->nRows,
+                                     workspace->dDenseA, workspace->nRows,
+                                     workspace->dLuWork, workspace->dLuPivot, workspace->dLuInfo));
+    checkCudaErrors(cudaMemcpy(&info, workspace->dLuInfo, sizeof(int), cudaMemcpyDeviceToHost));
+    return info == 0;
+}
+
+bool solveDenseLinearSystemFactored(DenseLinearSolveWorkspace *workspace,
+                                     const double *dRhs,
+                                     double *dSolution,
+                                     cusolverDnHandle_t cusolverDnHandle,
+                                     cudaStream_t cudaStream)
+{
+    int info = 0;
+    checkCudaErrors(cudaMemcpyAsync(dSolution, dRhs, sizeof(double) * (size_t)workspace->nRows,
+                                    cudaMemcpyDeviceToDevice, cudaStream));
+    checkCudaErrors(cusolverDnDgetrs(cusolverDnHandle, CUBLAS_OP_N,
+                                     workspace->nRows, 1,
+                                     workspace->dDenseA, workspace->nRows,
+                                     workspace->dLuPivot, dSolution, workspace->nRows,
+                                     workspace->dLuInfo));
+    checkCudaErrors(cudaMemcpy(&info, workspace->dLuInfo, sizeof(int), cudaMemcpyDeviceToHost));
+    return info == 0;
+}
+
 // CUDA 12+ cuSPARSE: legacy enums removed; use generic API enums
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
 #ifndef CUSPARSE_CSRMV_ALG2
@@ -166,6 +199,7 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
 
     cusparseMatDescr_t A_descr;
     DenseLinearSolveWorkspace denseLinearWorkspace;
+
 
     ///////////////////             GET STARTING POINT
     // initialise x, y, s
@@ -478,11 +512,22 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         // x, s multiplication: -x.*s on device (was host + 3 full-vector PCIe transfers)
         elem_min_mult_dev(d_x, d_s, d_resXS, node.ncols);
 
+        // Dense path: factorize once, then reuse for both affine and corrector solves.
+        // Sparse path: cusolverSpDcsrlsvqr does not expose separate factor/solve, so
+        // we call the monolithic solver for each RHS.
         if (useDenseLinearSolve)
         {
             sampleGpuMemory();
-            if (!solveDenseLinearSystem(&denseLinearWorkspace, d_rhs, d_sol,
-                                        node.cusparseHandle, node.cusolverDnHandle, node.cudaStream))
+            if (!factorizeDenseLinearSystem(&denseLinearWorkspace,
+                                            node.cusparseHandle, node.cusolverDnHandle))
+            {
+                infeasibleOrNumerical = true;
+                terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
+                break;
+            }
+            sampleGpuMemory();
+            if (!solveDenseLinearSystemFactored(&denseLinearWorkspace, d_rhs, d_sol,
+                                                 node.cusolverDnHandle, node.cudaStream))
             {
                 infeasibleOrNumerical = true;
                 terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
@@ -498,13 +543,13 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
                                                 d_rhs,
                                                 node.env->mehrotraCholTol, reorder,
                                                 d_sol, &singularity));
-        }
-        sampleGpuMemory();
-        if (!useDenseLinearSolve && singularity >= 0)
-        {
-            infeasibleOrNumerical = true;
-            terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
-            break;
+            sampleGpuMemory();
+            if (singularity >= 0)
+            {
+                infeasibleOrNumerical = true;
+                terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
+                break;
+            }
         }
 
         // affine step length: alphaMaxPrim = min(-x/dx for dx<0), alphaMaxDual = min(-s/ds for ds<0) on device
@@ -543,11 +588,13 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
                                     &alpha, d_bufferX, 1, d_resXS, 1));
 
+        // Solve corrector step (dense: triangular solve reusing LU factors;
+        // sparse: full QR solve — cusolverSpDcsrlsvqr has no separate factor/solve)
         if (useDenseLinearSolve)
         {
             sampleGpuMemory();
-            if (!solveDenseLinearSystem(&denseLinearWorkspace, d_rhs, d_sol,
-                                        node.cusparseHandle, node.cusolverDnHandle, node.cudaStream))
+            if (!solveDenseLinearSystemFactored(&denseLinearWorkspace, d_rhs, d_sol,
+                                                 node.cusolverDnHandle, node.cudaStream))
             {
                 infeasibleOrNumerical = true;
                 terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
@@ -563,14 +610,14 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
                                                 d_rhs,
                                                 node.env->mehrotraCholTol, reorder,
                                                 d_sol, &singularity));
+            if (singularity >= 0)
+            {
+                infeasibleOrNumerical = true;
+                terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
+                break;
+            }
         }
         sampleGpuMemory();
-        if (!useDenseLinearSolve && singularity >= 0)
-        {
-            infeasibleOrNumerical = true;
-            terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
-            break;
-        }
 
         // corrector step length: alpha-max on device
         alpha_max_dev(d_x, d_deltaX, d_s, d_deltaS, node.ncols,
