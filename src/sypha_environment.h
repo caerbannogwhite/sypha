@@ -11,6 +11,7 @@
 
 class SyphaNodeDense;
 class SyphaNodeSparse;
+struct IpmWorkspace;
 
 class SyphaEnvironment
 {
@@ -80,7 +81,7 @@ public:
     friend SyphaStatus solver_dense_mehrotra(SyphaNodeDense &node);
     friend SyphaStatus solver_dense_mehrotra_init(SyphaNodeDense &node);
     friend SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecutionConfig &config, SolverExecutionResult *result);
+    friend SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecutionConfig &config, SolverExecutionResult *result, IpmWorkspace *workspace);
     friend SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_1(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node);

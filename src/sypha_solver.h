@@ -52,4 +52,38 @@ bool solveDenseLinearSystemFactored(DenseLinearSolveWorkspace *workspace,
                                      cusolverDnHandle_t cusolverDnHandle,
                                      cudaStream_t cudaStream);
 
+/** Pre-allocated GPU workspace for the IPM main loop.
+ *  Allocated once and reused across B&B nodes to avoid per-node cudaMalloc churn. */
+struct IpmWorkspace
+{
+    int *d_csrAInds = NULL;
+    int *d_csrAOffs = NULL;
+    double *d_csrAVals = NULL;
+    int kktNnzCapacity = 0;
+    int kktNrowsCapacity = 0;
+
+    double *d_rhs = NULL;
+    double *d_sol = NULL;
+    double *d_prevSol = NULL;
+    int vectorCapacity = 0;
+
+    double *d_tmp_prim = NULL;
+    double *d_tmp_dual = NULL;
+    double *d_blockmin_prim = NULL;
+    double *d_blockmin_dual = NULL;
+    double *d_alphaResult = NULL;
+    int alphaCapacity = 0;
+    int alphaBlocksCapacity = 0;
+
+    double *d_buffer = NULL;
+    size_t bufferCapacity = 0;
+
+    cusparseMatDescr_t A_descr = NULL;
+
+    bool isAllocated = false;
+};
+
+void initializeIpmWorkspace(IpmWorkspace *ws, int maxKktNrows, int maxKktNnz, int maxNcols);
+void releaseIpmWorkspace(IpmWorkspace *ws);
+
 #endif // SYPHA_SOLVER_H

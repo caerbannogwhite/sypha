@@ -1,20 +1,6 @@
 
 #include "sypha_solver_utils.h"
 
-// __global__ void elementMultiplyVector_kernel(double *x, double *y, double *z, unsigned int N)
-// {
-//     unsigned int idx;
-//     for (idx = blockIdx.x * blockDim.x + threadIdx.x; idx < N; idx += gridDim.x * blockDim.x)
-//         z[idx] = x[idx] * y[idx];
-// }
-//
-// void elementMultiplyVector(double *x, double *y, double *z, unsigned int N)
-// {
-//     dim3 blockDim (128);
-//     dim3 gridDim (min((N - 1) / blockDim.x + 1, 32 * 1024));
-//     elementMultiplyVector_kernel <<<gridDim, blockDim>>>(x, y, z, N);
-// }
-
 __global__ void elem_min_mult_kernel(double *d_A, double *d_B, double *d_C, int N)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -22,12 +8,11 @@ __global__ void elem_min_mult_kernel(double *d_A, double *d_B, double *d_C, int 
         d_C[idx] = -d_A[idx] * d_B[idx];
 }
 
-void elem_min_mult_dev(double *d_A, double *d_B, double *d_C, int N)
+void elem_min_mult_dev(double *d_A, double *d_B, double *d_C, int N, cudaStream_t stream)
 {
     int blockDim = 256;
     int gridDim = (N + blockDim - 1) / blockDim;
-    elem_min_mult_kernel<<<gridDim, blockDim>>>(d_A, d_B, d_C, N);
-    cudaDeviceSynchronize();
+    elem_min_mult_kernel<<<gridDim, blockDim, 0, stream>>>(d_A, d_B, d_C, N);
 }
 
 void elem_min_mult_host(double *d_A, double *d_B, double *d_C, const int N)
@@ -79,12 +64,11 @@ __global__ void corrector_rhs_kernel(const double *d_deltaX, const double *d_del
 }
 
 void corrector_rhs_dev(double *d_deltaX, double *d_deltaS, double sigma, double mu,
-                       double *d_out, int N)
+                       double *d_out, int N, cudaStream_t stream)
 {
     const int blockDim = 256;
     const int gridDim = (N + blockDim - 1) / blockDim;
-    corrector_rhs_kernel<<<gridDim, blockDim>>>(d_deltaX, d_deltaS, sigma, mu, d_out, N);
-    cudaDeviceSynchronize();
+    corrector_rhs_kernel<<<gridDim, blockDim, 0, stream>>>(d_deltaX, d_deltaS, sigma, mu, d_out, N);
 }
 
 /** Step-length ratios: t_prim[j] = (dx[j]<0) ? -x[j]/dx[j] : DBL_MAX, same for dual. */
@@ -131,39 +115,70 @@ __global__ void computeMinimum_kernel(double *x, double *result, const unsigned 
         result[blockIdx.x] = sdata[0];
 }
 
-/** Compute alphaMaxPrim = min(-x/delta_x over delta_x<0), alphaMaxDual = min(-s/delta_s over delta_s<0) on device.
- *  Caller must provide device buffers: d_tmp_prim, d_tmp_dual (length N), d_blockmin_prim, d_blockmin_dual (length nBlocks). */
+/** Final reduction: reduce nBlocks block-level minimums to a single scalar.
+ *  Launched with gridDim=1, blockDim=next_power_of_2(nBlocks). */
+__global__ void finalMinimum_kernel(const double *blockResults, double *result, int nBlocks)
+{
+    extern __shared__ double sdata[];
+    unsigned int tid = threadIdx.x;
+
+    double val = DBL_MAX;
+    if ((int)tid < nBlocks)
+    {
+        val = blockResults[tid];
+    }
+    sdata[tid] = val;
+    __syncthreads();
+
+    for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1)
+    {
+        if (tid < s)
+        {
+            sdata[tid] = fmin(sdata[tid], sdata[tid + s]);
+        }
+        __syncthreads();
+    }
+
+    if (tid == 0)
+        result[0] = sdata[0];
+}
+
 void alpha_max_dev(const double *d_x, const double *d_deltaX, const double *d_s, const double *d_deltaS,
                    int N,
                    double *d_tmp_prim, double *d_tmp_dual,
                    double *d_blockmin_prim, double *d_blockmin_dual,
-                   double *alphaMaxPrim, double *alphaMaxDual)
+                   double *d_alphaResult,
+                   double *alphaMaxPrim, double *alphaMaxDual,
+                   cudaStream_t stream)
 {
-    const int blockDim = 256;
-    const int gridDim = (N + blockDim - 1) / blockDim;
-    const size_t shmem = blockDim * sizeof(double);
+    const int blockSize = 256;
+    const int nBlocks = (N + blockSize - 1) / blockSize;
+    const size_t shmem = blockSize * sizeof(double);
 
-    alpha_max_ratios_kernel<<<gridDim, blockDim>>>(d_x, d_deltaX, d_s, d_deltaS, d_tmp_prim, d_tmp_dual, N);
-    computeMinimum_kernel<<<gridDim, blockDim, shmem>>>(d_tmp_prim, d_blockmin_prim, (unsigned int)N);
-    computeMinimum_kernel<<<gridDim, blockDim, shmem>>>(d_tmp_dual, d_blockmin_dual, (unsigned int)N);
-    cudaDeviceSynchronize();
+    if (nBlocks > 1024)
+    {
+        return; /* safety: leave outputs unchanged */
+    }
 
-    /* Final min on host over block results */
-    double h_prim[1024], h_dual[1024];
-    if (gridDim > 1024)
-    {
-        cudaDeviceSynchronize();
-        return; /* fallback: leave *alphaMaxPrim/Dual unchanged */
-    }
-    cudaMemcpy(h_prim, d_blockmin_prim, gridDim * sizeof(double), cudaMemcpyDeviceToHost);
-    cudaMemcpy(h_dual, d_blockmin_dual, gridDim * sizeof(double), cudaMemcpyDeviceToHost);
-    *alphaMaxPrim = h_prim[0];
-    *alphaMaxDual = h_dual[0];
-    for (int i = 1; i < gridDim; i++)
-    {
-        if (h_prim[i] < *alphaMaxPrim)
-            *alphaMaxPrim = h_prim[i];
-        if (h_dual[i] < *alphaMaxDual)
-            *alphaMaxDual = h_dual[i];
-    }
+    // Step 1: compute per-element ratios
+    alpha_max_ratios_kernel<<<nBlocks, blockSize, 0, stream>>>(d_x, d_deltaX, d_s, d_deltaS, d_tmp_prim, d_tmp_dual, N);
+
+    // Step 2: per-block reduction
+    computeMinimum_kernel<<<nBlocks, blockSize, shmem, stream>>>(d_tmp_prim, d_blockmin_prim, (unsigned int)N);
+    computeMinimum_kernel<<<nBlocks, blockSize, shmem, stream>>>(d_tmp_dual, d_blockmin_dual, (unsigned int)N);
+
+    // Step 3: final reduction on GPU (1 block)
+    int finalBlockSize = 1;
+    while (finalBlockSize < nBlocks) finalBlockSize <<= 1;
+    if (finalBlockSize < 1) finalBlockSize = 1;
+    size_t finalShmem = finalBlockSize * sizeof(double);
+    finalMinimum_kernel<<<1, finalBlockSize, finalShmem, stream>>>(d_blockmin_prim, &d_alphaResult[0], nBlocks);
+    finalMinimum_kernel<<<1, finalBlockSize, finalShmem, stream>>>(d_blockmin_dual, &d_alphaResult[1], nBlocks);
+
+    // Step 4: copy just 2 doubles to host
+    double h_result[2];
+    cudaMemcpyAsync(h_result, d_alphaResult, 2 * sizeof(double), cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
+    *alphaMaxPrim = h_result[0];
+    *alphaMaxDual = h_result[1];
 }

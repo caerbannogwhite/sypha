@@ -1,4 +1,5 @@
 #include "sypha_solver_sparse.h"
+#include "sypha_solver.h"
 #include "sypha_solver_bnb.h"
 #include "sypha_solver_heuristics.h"
 #include "sypha_node_sparse.h"
@@ -129,6 +130,19 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
 
     BaseRelaxationModel base;
     buildBaseModel(&base);
+
+    // Pre-allocate IPM workspace for B&B reuse (avoids ~20 cudaMalloc/cudaFree per node).
+    IpmWorkspace ipmWorkspace;
+    {
+        const int maxBranchDecisions = base.ncolsOriginal;
+        const int maxNcols = base.ncols + maxBranchDecisions;
+        const int maxNrows = base.nrows + maxBranchDecisions;
+        const int maxNnz = base.nnz + 2 * maxBranchDecisions;
+        const int maxKktNrows = 2 * maxNcols + maxNrows;
+        const int maxKktNnz = 2 * maxNnz + 3 * maxNcols;
+        initializeIpmWorkspace(&ipmWorkspace, maxKktNrows, maxKktNnz, maxNcols);
+    }
+
     std::unique_ptr<IBranchVariableSelector> selector = makeBranchSelector(node.env->bnbVarSelectionStrategy);
 
     // Keep the original LP matrix resident on the device for the whole BnB run.
@@ -326,6 +340,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
 
         if (node.copyModelOnDevice() != CODE_SUCCESFULL)
         {
+            releaseIpmWorkspace(&ipmWorkspace);
             releaseBaseCopies();
             return CODE_GENERIC_ERROR;
         }
@@ -337,9 +352,10 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         config.gapStagnation.minImprovementPct = node.env->bnbGapStallMinImprovPct;
         config.bnbNodeOrdinal = processedNodes + 1;
         config.denseSelectionLogEveryNodes = 10;
+        config.skipGpuMemorySampling = true;
 
         SolverExecutionResult result;
-        const SyphaStatus solveStatus = solver_sparse_mehrotra_run(node, config, &result);
+        const SyphaStatus solveStatus = solver_sparse_mehrotra_run(node, config, &result, &ipmWorkspace);
         if (solveStatus != CODE_SUCCESFULL || result.status != CODE_SUCCESFULL)
         {
             if (entry.nodeId == 0)
@@ -350,6 +366,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                 node.mipGap = std::numeric_limits<double>::infinity();
                 node.iterations = result.iterations;
                 node.timeSolverEnd = node.env->timer();
+                releaseIpmWorkspace(&ipmWorkspace);
                 releaseBaseCopies();
                 return CODE_GENERIC_ERROR;
             }
@@ -606,10 +623,12 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
 
             if (node.copyModelOnDevice() != CODE_SUCCESFULL)
             {
+                releaseIpmWorkspace(&ipmWorkspace);
                 releaseBaseCopies();
                 return CODE_GENERIC_ERROR;
             }
 
+            releaseIpmWorkspace(&ipmWorkspace);
             releaseBaseCopies();
 
             const SyphaStatus lpStatus = solver_sparse_mehrotra(node);
@@ -621,6 +640,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         }
     }
 
+    releaseIpmWorkspace(&ipmWorkspace);
     releaseBaseCopies();
 
     node.timeSolverEnd = node.env->timer();

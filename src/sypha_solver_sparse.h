@@ -8,6 +8,7 @@
 #include "gsl/gsl_linalg.h"
 
 class SyphaNodeSparse;
+struct IpmWorkspace;
 
 enum SolverTerminationReason
 {
@@ -30,6 +31,7 @@ struct SolverExecutionConfig
     SolverGapStagnationConfig gapStagnation;
     int bnbNodeOrdinal = 0;
     int denseSelectionLogEveryNodes = 1;
+    bool skipGpuMemorySampling = false;
 };
 
 struct SolverExecutionResult
@@ -44,7 +46,7 @@ struct SolverExecutionResult
     std::vector<double> dualSolution;
 };
 
-SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecutionConfig &config, SolverExecutionResult *result);
+SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecutionConfig &config, SolverExecutionResult *result, IpmWorkspace *workspace = nullptr);
 SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node);
 
 #endif // SYPHA_SOLVER_SPARSE_H
