@@ -16,6 +16,7 @@ struct BranchNodeState
 {
     std::vector<BranchDecision> decisions;
     int depth = 0;
+    double parentDualBound = -std::numeric_limits<double>::infinity();
 };
 
 struct BaseRelaxationModel

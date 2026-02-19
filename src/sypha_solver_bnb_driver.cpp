@@ -146,7 +146,13 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     }
 
     std::vector<BranchNodeState> nodes;
-    nodes.push_back(BranchNodeState());
+    {
+        BranchNodeState rootState;
+        rootState.parentDualBound = std::isfinite(globalRelaxLowerBound)
+                                        ? globalRelaxLowerBound
+                                        : -std::numeric_limits<double>::infinity();
+        nodes.push_back(rootState);
+    }
 
     std::deque<int> frontier;
     frontier.push_back(0);
@@ -155,6 +161,12 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
 
     int processedNodes = 0;
     int totalLpIterations = 0;
+    bool gapToleranceReached = false;
+    // The IPM cannot prove LP bounds tighter than muTol. The global dual
+    // bound is the *minimum* over several imprecise LP duals, so the MIP
+    // gap can slightly exceed muTol even at true optimality. Use 2*muTol
+    // to account for this aggregation effect.
+    const double mipGapTolerance = 2.0 * node.env->mehrotraMuTol;
     node.env->logger("Branch-and-bound started", "INFO", 5);
     node.timeSolverStart = node.env->timer();
     const double bnbStartMs = node.timeSolverStart;
@@ -184,8 +196,44 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             node.env->logger("BnB hard time limit reached", "INFO", 5);
             break;
         }
+        if (std::isfinite(bestIntegerObj) && std::isfinite(globalRelaxLowerBound))
+        {
+            const double currentGap = compute_mip_gap(bestIntegerObj, globalRelaxLowerBound);
+            if (std::isfinite(currentGap) && currentGap <= mipGapTolerance)
+            {
+                gapToleranceReached = true;
+                sprintf(message, "MIP gap %.6f%% within LP solver tolerance (%.6f%%); declaring optimal",
+                        currentGap * 100.0, mipGapTolerance * 100.0);
+                node.env->logger(message, "INFO", 5);
+                break;
+            }
+        }
         if ((logIntervalMs > 0.0) && (loopNowMs >= nextLogMs))
         {
+            // Recompute global dual bound from open frontier before logging.
+            {
+                double newGlobalBound = std::numeric_limits<double>::infinity();
+                for (const int fIdx : frontier)
+                {
+                    newGlobalBound = std::min(newGlobalBound, nodes[(size_t)fIdx].parentDualBound);
+                }
+                // Also consider nodes buffered in the device window that
+                // have already been popped from the frontier.
+                for (size_t wi = deviceWindow.cursorPos(); wi < deviceWindow.windowSize(); ++wi)
+                {
+                    const int bufferedNodeId = deviceWindow.peekNodeId(wi);
+                    newGlobalBound = std::min(newGlobalBound, nodes[(size_t)bufferedNodeId].parentDualBound);
+                }
+                if (std::isfinite(newGlobalBound))
+                {
+                    globalRelaxLowerBound = newGlobalBound;
+                }
+                else if (frontier.empty() && !deviceWindow.hasBufferedNode())
+                {
+                    // No open nodes remain: dual bound = incumbent.
+                    globalRelaxLowerBound = bestIntegerObj;
+                }
+            }
             char incumbentStr[64];
             char dualStr[64];
             char gapStr[64];
@@ -238,6 +286,12 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         }
 
         const BranchNodeState branchNode = nodes[(size_t)entry.nodeId];
+
+        // Prune before LP solve: if parent dual bound already >= incumbent, skip.
+        if (branchNode.parentDualBound >= bestIntegerObj - node.env->pxTolerance)
+        {
+            continue;
+        }
 
         std::vector<int> workInds;
         std::vector<int> workOffs;
@@ -314,13 +368,11 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             (result.status == CODE_SUCCESFULL) &&
             (result.terminationReason == SOLVER_TERM_CONVERGED) &&
             dualBoundConsistent;
-        if (boundIsReliableForPruning)
-        {
-            globalRelaxLowerBound = std::min(globalRelaxLowerBound, result.dualObj);
-        }
+        const double nodeDualBound = (boundIsReliableForPruning) ? result.dualObj : branchNode.parentDualBound;
 
         if ((processedNodes == 1) || ((heuristicFrequency > 0) && (processedNodes % heuristicFrequency == 0)))
         {
+            bool incumbentImproved = false;
             for (const auto &heuristic : heuristics)
             {
                 IntegerHeuristicResult heuristicRes = heuristic->tryBuild(result.primalSolution, result.dualSolution, base, branchNode, integralityTol);
@@ -329,6 +381,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                     bestIntegerObj = heuristicRes.objective;
                     bestIntegerSolution = heuristicRes.solution;
                     incumbentSource = heuristicRes.name;
+                    incumbentImproved = true;
                     if (node.env->showSolution)
                     {
                         sprintf(message, "New incumbent from heuristic '%s': %.12g", heuristicRes.name.c_str(), heuristicRes.objective);
@@ -341,9 +394,29 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                     break;
                 }
             }
+            // Prune frontier nodes dominated by the new incumbent.
+            if (incumbentImproved)
+            {
+                const double pruneBound = bestIntegerObj - node.env->pxTolerance;
+                size_t before = frontier.size();
+                std::deque<int> surviving;
+                for (const int fIdx : frontier)
+                {
+                    if (nodes[(size_t)fIdx].parentDualBound < pruneBound)
+                    {
+                        surviving.push_back(fIdx);
+                    }
+                }
+                frontier.swap(surviving);
+                if (frontier.size() < before)
+                {
+                    sprintf(message, "Frontier pruned: %zu -> %zu nodes", before, frontier.size());
+                    node.env->logger(message, "INFO", 5);
+                }
+            }
         }
 
-        if (boundIsReliableForPruning && (result.dualObj >= bestIntegerObj - node.env->pxTolerance))
+        if (nodeDualBound >= bestIntegerObj - node.env->pxTolerance)
         {
             continue;
         }
@@ -356,6 +429,23 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                 bestIntegerObj = result.primalObj;
                 bestIntegerSolution = result.primalSolution;
                 incumbentSource = "exact_node";
+                // Prune frontier nodes dominated by the new incumbent.
+                const double pruneBound = bestIntegerObj - node.env->pxTolerance;
+                size_t before = frontier.size();
+                std::deque<int> surviving;
+                for (const int fIdx : frontier)
+                {
+                    if (nodes[(size_t)fIdx].parentDualBound < pruneBound)
+                    {
+                        surviving.push_back(fIdx);
+                    }
+                }
+                frontier.swap(surviving);
+                if (frontier.size() < before)
+                {
+                    sprintf(message, "Frontier pruned: %zu -> %zu nodes", before, frontier.size());
+                    node.env->logger(message, "INFO", 5);
+                }
             }
             continue;
         }
@@ -376,6 +466,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         BranchNodeState childZero;
         if (append_decision_if_consistent(branchNode, branchVar, 0, &childZero))
         {
+            childZero.parentDualBound = nodeDualBound;
             nodes.push_back(childZero);
             frontier.push_back((int)nodes.size() - 1);
         }
@@ -383,8 +474,31 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         BranchNodeState childOne;
         if (append_decision_if_consistent(branchNode, branchVar, 1, &childOne))
         {
+            childOne.parentDualBound = nodeDualBound;
             nodes.push_back(childOne);
             frontier.push_back((int)nodes.size() - 1);
+        }
+    }
+
+    // Recompute global dual bound from remaining open nodes.
+    {
+        double newGlobalBound = std::numeric_limits<double>::infinity();
+        for (const int fIdx : frontier)
+        {
+            newGlobalBound = std::min(newGlobalBound, nodes[(size_t)fIdx].parentDualBound);
+        }
+        for (size_t wi = deviceWindow.cursorPos(); wi < deviceWindow.windowSize(); ++wi)
+        {
+            const int bufferedNodeId = deviceWindow.peekNodeId(wi);
+            newGlobalBound = std::min(newGlobalBound, nodes[(size_t)bufferedNodeId].parentDualBound);
+        }
+        if (std::isfinite(newGlobalBound))
+        {
+            globalRelaxLowerBound = newGlobalBound;
+        }
+        else if (frontier.empty() && !deviceWindow.hasBufferedNode() && std::isfinite(bestIntegerObj))
+        {
+            globalRelaxLowerBound = bestIntegerObj;
         }
     }
 
@@ -413,14 +527,18 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         node.objvalPrim = std::numeric_limits<double>::infinity();
     }
     if (std::isfinite(bestIntegerObj) &&
-        frontierExhausted &&
+        (frontierExhausted || gapToleranceReached || (frontier.empty() && !deviceWindow.hasBufferedNode())) &&
         !hardTimeLimitReached &&
         (processedNodes < node.env->bnbMaxNodes))
     {
-        // Full tree exhaustion with an incumbent means optimality is proven.
+        // Optimality proven: either the frontier is exhausted or the MIP gap
+        // has closed to within the LP solver's numerical precision.
         node.objvalDual = bestIntegerObj;
         node.mipGap = 0.0;
-        node.env->logger("Optimality proven: search frontier exhausted", "INFO", 5);
+        if (!gapToleranceReached)
+        {
+            node.env->logger("Optimality proven: search frontier exhausted", "INFO", 5);
+        }
     }
     else
     {

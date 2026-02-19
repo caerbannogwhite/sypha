@@ -78,6 +78,21 @@ bool DeviceNodeWindow::pop(DeviceQueueEntry *outEntry)
     return true;
 }
 
+size_t DeviceNodeWindow::cursorPos() const
+{
+    return cursor;
+}
+
+size_t DeviceNodeWindow::windowSize() const
+{
+    return hostWindow.size();
+}
+
+int DeviceNodeWindow::peekNodeId(size_t index) const
+{
+    return hostWindow[index].nodeId;
+}
+
 bool append_decision_if_consistent(const BranchNodeState &parent, int var, int value, BranchNodeState *child)
 {
     *child = parent;

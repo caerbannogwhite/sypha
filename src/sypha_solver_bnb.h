@@ -24,6 +24,9 @@ public:
     bool hasBufferedNode() const;
     bool refill(std::deque<int> &frontier, const std::vector<BranchNodeState> &states);
     bool pop(DeviceQueueEntry *outEntry);
+    size_t cursorPos() const;
+    size_t windowSize() const;
+    int peekNodeId(size_t index) const;
 
 private:
     int cap = 1;
