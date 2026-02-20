@@ -3,13 +3,14 @@
 
 int main(int argc, char *argv[])
 {
-	char message[1024];
-
 	SyphaEnvironment *env = new SyphaEnvironment(argc, argv);
 	if (env->getStatus() != CODE_SUCCESFULL)
 	{
+		delete env;
 		return -1;
 	}
+
+	SyphaLogger *log = env->getLogger();
 
 	if (env->getVerbosityLevel() > 1)
 	{
@@ -31,61 +32,57 @@ int main(int argc, char *argv[])
 
 	SyphaNodeSparse *mainNode = new SyphaNodeSparse(*env);
 
-	env->logger("Environment initialised", "INFO", 5);
+	log->log(LOG_INFO, "Environment initialized");
 	double timeStart = env->timer();
 	SyphaStatus runStatus = CODE_SUCCESFULL;
 
-	env->logger("Reading model", "INFO", 5);
+	log->log(LOG_INFO, "Reading model");
 	runStatus = mainNode->readModel();
 	if (runStatus != CODE_SUCCESFULL)
 	{
-		sprintf(message, "readModel failed with status %d", (int)runStatus);
-		env->logger(message, "ERROR", 0);
+		log->log(LOG_ERROR, "Model read failed with status %d", (int)runStatus);
+		delete mainNode;
+		delete env;
 		return 1;
 	}
 
-	env->logger("Copying model to device", "INFO", 5);
+	log->log(LOG_INFO, "Copying model to device");
 	runStatus = mainNode->copyModelOnDevice();
 	if (runStatus != CODE_SUCCESFULL)
 	{
-		sprintf(message, "copyModelOnDevice failed with status %d", (int)runStatus);
-		env->logger(message, "ERROR", 0);
+		log->log(LOG_ERROR, "Device copy failed with status %d", (int)runStatus);
+		delete mainNode;
+		delete env;
 		return 1;
 	}
 
-	env->logger("Launching solver", "INFO", 5);
+	log->log(LOG_INFO, "Launching solver");
 	runStatus = mainNode->solve();
 	if (runStatus != CODE_SUCCESFULL)
 	{
-		sprintf(message, "solve failed with status %d", (int)runStatus);
-		env->logger(message, "ERROR", 0);
+		log->log(LOG_ERROR, "Solver failed with status %d", (int)runStatus);
+		delete mainNode;
+		delete env;
 		return 1;
 	}
 
-	env->logger("--- Solution ---", "INFO", 0);
-	sprintf(message, "  Primal:     %.20g", mainNode->getObjvalPrim());
-	env->logger(message, "INFO", 0);
-	sprintf(message, "  Dual:       %.20g", mainNode->getObjvalDual());
-	env->logger(message, "INFO", 0);
+	log->log(LOG_INFO, "--- Solution ---");
+	log->log(LOG_INFO, "  Primal:     %.20g", mainNode->getObjvalPrim());
+	log->log(LOG_INFO, "  Dual:       %.20g", mainNode->getObjvalDual());
 	if (std::isfinite(mainNode->getMipGap()))
-	{
-		sprintf(message, "  MIP gap:    %.6f%%", mainNode->getMipGap() * 100.0);
-	}
+		log->log(LOG_INFO, "  MIP gap:    %.6f%%", mainNode->getMipGap() * 100.0);
 	else
-	{
-		sprintf(message, "  MIP gap:    n/a");
-	}
-	env->logger(message, "INFO", 0);
+		log->log(LOG_INFO, "  MIP gap:    n/a");
 
-	env->logger("--- Run statistics ---", "INFO", 0);
-	sprintf(message, "  Iterations: %d", mainNode->getIterations());
-	env->logger(message, "INFO", 0);
-	sprintf(message, "  Time (s):   start %.3f  pre %.2f  solver %.2f  total %.2f",
+	log->log(LOG_INFO, "--- Run statistics ---");
+	log->log(LOG_INFO, "  Iterations: %d", mainNode->getIterations());
+	log->log(LOG_INFO, "  Time (s):   start %.3f  pre %.2f  solver %.2f  total %.2f",
 		mainNode->getTimeStartSol() / 1000.0,
 		mainNode->getTimePreSol() / 1000.0,
 		mainNode->getTimeSolver() / 1000.0,
 		(env->timer() - timeStart) / 1000.0);
-	env->logger(message, "INFO", 0);
 
+	delete mainNode;
+	delete env;
 	return 0;
 }

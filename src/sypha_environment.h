@@ -4,6 +4,7 @@
 #include <cuda_runtime.h>
 
 #include "common.h"
+#include "sypha_logger.h"
 #include "sypha_solver_dense.h"
 #include "sypha_solver_sparse.h"
 #include "sypha_node_dense.h"
@@ -58,22 +59,24 @@ private:
     bool showSolution;
     string preprocessColumnStrategies;
 
+    SyphaLogger *logger_ = nullptr;
+
 public:
     SyphaEnvironment();
     SyphaEnvironment(int argc, char *argv[]);
+    ~SyphaEnvironment();
 
     int getVerbosityLevel();
     std::string getTest();
     SyphaStatus getStatus();
     bool getShowSolution();
+    SyphaLogger *getLogger();
 
     double timer();
 
     SyphaStatus setDefaultParameters();
     SyphaStatus setUpDevice();
     SyphaStatus readInputArguments(int argc, char *argv[]);
-
-    void logger(string message, string type, int level);
 
     friend class SyphaNodeDense;
     friend class SyphaNodeSparse;

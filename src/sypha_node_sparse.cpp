@@ -317,7 +317,7 @@ SyphaStatus SyphaNodeSparse::preprocessModel(double incumbentUpperBound)
 
     if (newActiveToInput.empty())
     {
-        this->env->logger("Preprocessing removed all original columns; keeping original model", "INFO", 5);
+        this->env->getLogger()->log(LOG_INFO, "Preprocessing removed all columns; keeping original model");
         return CODE_SUCCESFULL;
     }
 
@@ -383,10 +383,8 @@ SyphaStatus SyphaNodeSparse::preprocessModel(double incumbentUpperBound)
     this->ncols = newOriginalCols + this->nrows;
     this->nnz = (int)newCsrVals.size();
 
-    char message[256];
-    sprintf(message, "Preprocessing removed %d columns (%d by incumbent, %d by rules), remaining %d/%d",
+    this->env->getLogger()->log(LOG_INFO, "Preprocessing removed %d columns (%d by incumbent, %d by rules), remaining %d/%d",
             removedColumns, removedByIncumbent, removedByRules, this->ncolsOriginal, this->ncolsInputOriginal);
-    this->env->logger(message, "INFO", 5);
 
     return CODE_SUCCESFULL;
 }

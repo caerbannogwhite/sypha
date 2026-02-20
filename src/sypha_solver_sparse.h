@@ -16,6 +16,7 @@ enum SolverTerminationReason
     SOLVER_TERM_MAX_ITER,
     SOLVER_TERM_GAP_STALLED,
     SOLVER_TERM_INFEASIBLE_OR_NUMERICAL,
+    SOLVER_TERM_TIME_LIMIT,
 };
 
 struct SolverGapStagnationConfig

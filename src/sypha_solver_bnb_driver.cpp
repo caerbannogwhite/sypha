@@ -18,7 +18,7 @@
 
 SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
 {
-    char message[1024];
+    SyphaLogger *log = node.env->getLogger();
     auto buildBaseModel = [&](BaseRelaxationModel *base) {
         base->nrows = node.nrows;
         base->ncols = node.ncols;
@@ -57,7 +57,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     std::string incumbentSource = "none";
     double globalRelaxLowerBound = std::numeric_limits<double>::infinity();
 
-    node.env->logger("BnB preprocessing: solving root LP relaxation", "INFO", 5);
+    log->log(LOG_INFO, "BnB preprocessing: solving root LP relaxation");
     SolverExecutionConfig presolveConfig;
     presolveConfig.maxIterations = node.env->mehrotraMaxIter;
     presolveConfig.gapStagnation.enabled = false;
@@ -104,7 +104,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     }
     else
     {
-        node.env->logger("BnB preprocessing: root LP did not converge, continuing without incumbent bound", "INFO", 5);
+        log->log(LOG_INFO, "Root LP did not converge, continuing without incumbent bound");
     }
 
     const SyphaStatus preprocessStatus = node.preprocessModel(bestIntegerObj);
@@ -112,15 +112,13 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     {
         return preprocessStatus;
     }
-    sprintf(message,
-            "Preprocessing size: original rows=%d cols=%d nnz=%d -> preprocessed rows=%d cols=%d nnz=%d",
-            originalRowsForPreprocess, originalColsForPreprocess, originalNnzForPreprocess,
-            node.nrows, node.ncolsOriginal, node.nnz);
-    node.env->logger(message, "INFO", 5);
+    log->log(LOG_INFO, "Preprocessing: rows %d->%d, cols %d->%d, nnz %d->%d",
+            originalRowsForPreprocess, node.nrows,
+            originalColsForPreprocess, node.ncolsOriginal,
+            originalNnzForPreprocess, node.nnz);
     if (std::isfinite(bestIntegerObj))
     {
-        sprintf(message, "Preprocessing incumbent from %s: %.12g", incumbentSource.c_str(), bestIntegerObj);
-        node.env->logger(message, "INFO", 5);
+        log->log(LOG_INFO, "Preprocessing incumbent from %s: %.12g", incumbentSource.c_str(), bestIntegerObj);
     }
 
     if (node.copyModelOnDevice() != CODE_SUCCESFULL)
@@ -181,7 +179,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     // gap can slightly exceed muTol even at true optimality. Use 2*muTol
     // to account for this aggregation effect.
     const double mipGapTolerance = 2.0 * node.env->mehrotraMuTol;
-    node.env->logger("Branch-and-bound started", "INFO", 5);
+    log->log(LOG_INFO, "Branch-and-bound started");
     node.timeSolverStart = node.env->timer();
     const double bnbStartMs = node.timeSolverStart;
     const double logIntervalMs = node.env->bnbLogIntervalSeconds > 0.0 ? node.env->bnbLogIntervalSeconds * 1000.0 : 0.0;
@@ -207,7 +205,13 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         if ((hardTimeLimitMs > 0.0) && ((loopNowMs - bnbStartMs) >= hardTimeLimitMs))
         {
             hardTimeLimitReached = true;
-            node.env->logger("BnB hard time limit reached", "INFO", 5);
+            log->log(LOG_INFO, "BnB hard time limit reached");
+            break;
+        }
+        if (log->isStopRequested())
+        {
+            hardTimeLimitReached = true;
+            log->log(LOG_INFO, "BnB stopped by watchdog time limit");
             break;
         }
         if (std::isfinite(bestIntegerObj) && std::isfinite(globalRelaxLowerBound))
@@ -216,9 +220,8 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             if (std::isfinite(currentGap) && currentGap <= mipGapTolerance)
             {
                 gapToleranceReached = true;
-                sprintf(message, "MIP gap %.6f%% within LP solver tolerance (%.6f%%); declaring optimal",
+                log->log(LOG_INFO, "MIP gap %.6f%% within LP solver tolerance (%.6f%%); declaring optimal",
                         currentGap * 100.0, mipGapTolerance * 100.0);
-                node.env->logger(message, "INFO", 5);
                 break;
             }
         }
@@ -252,35 +255,22 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             char dualStr[64];
             char gapStr[64];
             if (std::isfinite(bestIntegerObj))
-            {
                 snprintf(incumbentStr, sizeof(incumbentStr), "%.12g", bestIntegerObj);
-            }
             else
-            {
                 snprintf(incumbentStr, sizeof(incumbentStr), "inf");
-            }
             if (std::isfinite(globalRelaxLowerBound))
-            {
                 snprintf(dualStr, sizeof(dualStr), "%.12g", globalRelaxLowerBound);
-            }
             else
-            {
                 snprintf(dualStr, sizeof(dualStr), "inf");
-            }
             const double currGap = compute_mip_gap(bestIntegerObj, globalRelaxLowerBound);
             if (std::isfinite(currGap))
-            {
                 snprintf(gapStr, sizeof(gapStr), "%.4f%%", currGap * 100.0);
-            }
             else
-            {
                 snprintf(gapStr, sizeof(gapStr), "inf");
-            }
-            snprintf(message, sizeof(message),
+            log->log(LOG_INFO,
                      "  nodes=%4d frontier=%4zu lp_iters=%5d incumbent=%10s dual=%10s gap=%6s elapsed=%.2fs",
                      processedNodes, frontier.size(), totalLpIterations,
                      incumbentStr, dualStr, gapStr, (loopNowMs - bnbStartMs) / 1000.0);
-            node.env->logger(message, "INFO", 5);
             nextLogMs = loopNowMs + logIntervalMs;
         }
 
@@ -360,7 +350,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         {
             if (entry.nodeId == 0)
             {
-                node.env->logger("Root LP relaxation infeasible or numerically unstable; aborting BnB", "INFO", 5);
+                log->log(LOG_INFO, "Root LP infeasible or numerically unstable; aborting BnB");
                 node.objvalPrim = std::numeric_limits<double>::infinity();
                 node.objvalDual = std::numeric_limits<double>::infinity();
                 node.mipGap = std::numeric_limits<double>::infinity();
@@ -400,14 +390,9 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                     incumbentSource = heuristicRes.name;
                     incumbentImproved = true;
                     if (node.env->showSolution)
-                    {
-                        sprintf(message, "New incumbent from heuristic '%s': %.12g", heuristicRes.name.c_str(), heuristicRes.objective);
-                    }
+                        log->log(LOG_INFO, "New incumbent from heuristic '%s': %.12g", heuristicRes.name.c_str(), heuristicRes.objective);
                     else
-                    {
-                        sprintf(message, "New incumbent found: %.12g", heuristicRes.objective);
-                    }
-                    node.env->logger(message, "INFO", 5);
+                        log->log(LOG_INFO, "New incumbent found: %.12g", heuristicRes.objective);
                     break;
                 }
             }
@@ -427,8 +412,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                 frontier.swap(surviving);
                 if (frontier.size() < before)
                 {
-                    sprintf(message, "Frontier pruned: %zu -> %zu nodes", before, frontier.size());
-                    node.env->logger(message, "INFO", 5);
+                    log->log(LOG_INFO, "Frontier pruned: %zu -> %zu nodes", before, frontier.size());
                 }
             }
         }
@@ -460,8 +444,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                 frontier.swap(surviving);
                 if (frontier.size() < before)
                 {
-                    sprintf(message, "Frontier pruned: %zu -> %zu nodes", before, frontier.size());
-                    node.env->logger(message, "INFO", 5);
+                    log->log(LOG_INFO, "Frontier pruned: %zu -> %zu nodes", before, frontier.size());
                 }
             }
             continue;
@@ -554,7 +537,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         node.mipGap = 0.0;
         if (!gapToleranceReached)
         {
-            node.env->logger("Optimality proven: search frontier exhausted", "INFO", 5);
+            log->log(LOG_INFO, "Optimality proven: search frontier exhausted");
         }
     }
     else
@@ -563,39 +546,34 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         node.mipGap = compute_mip_gap(node.objvalPrim, node.objvalDual);
     }
 
-    sprintf(message, "Branch-and-bound processed %d nodes", processedNodes);
-    node.env->logger(message, "INFO", 5);
-    sprintf(message, "Total LP iterations across nodes: %d", totalLpIterations);
-    node.env->logger(message, "INFO", 5);
+    log->log(LOG_INFO, "BnB processed %d nodes, %d total LP iterations", processedNodes, totalLpIterations);
     if (std::isfinite(bestIntegerObj))
     {
-        node.env->logger("Best integer incumbent found", "INFO", 5);
+        log->log(LOG_INFO, "Best integer incumbent found");
         if (node.env->showSolution)
         {
-            sprintf(message, "  Source: %s", incumbentSource.c_str());
-            node.env->logger(message, "INFO", 5);
+            log->log(LOG_INFO, "  Source: %s", incumbentSource.c_str());
             const int logCols = std::min(base.ncolsOriginal, (int)bestIntegerSolution.size());
             for (int j = 0; j < logCols; ++j)
             {
                 if (bestIntegerSolution[(size_t)j] > 0.5)
                 {
                     const int origCol = base.activeToOriginalCol[(size_t)j];
-                    sprintf(message, "  x[%d] = %.0f", origCol, bestIntegerSolution[(size_t)j]);
-                    node.env->logger(message, "INFO", 5);
+                    log->log(LOG_INFO, "  x[%d] = %.0f", origCol, bestIntegerSolution[(size_t)j]);
                 }
             }
         }
     }
     else
     {
-        node.env->logger("No integer incumbent found within node limit", "INFO", 5);
+        log->log(LOG_INFO, "No integer incumbent found within node limit");
         if (hardTimeLimitReached)
         {
-            node.env->logger("Search stopped by hard time limit", "INFO", 5);
+            log->log(LOG_INFO, "Search stopped by hard time limit");
         }
         if (node.env->bnbAutoFallbackLp)
         {
-            node.env->logger("Falling back to LP relaxation solve", "INFO", 5);
+            log->log(LOG_INFO, "Falling back to LP relaxation solve");
 
             node.nrows = base.nrows;
             node.ncols = base.ncols;

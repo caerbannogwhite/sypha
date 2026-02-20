@@ -14,11 +14,36 @@ SyphaEnvironment::SyphaEnvironment(int argc, char *argv[])
     this->internalStatus = this->setDefaultParameters();
     if (this->internalStatus == CODE_SUCCESFULL)
     {
+        logger_ = new SyphaLogger(this->timer(), LOG_INFO);
         this->internalStatus = this->readInputArguments(argc, argv);
         if (this->internalStatus == CODE_SUCCESFULL)
         {
+            SyphaLogLevel logLevel;
+            if (verbosityLevel <= 0)
+                logLevel = LOG_ERROR;
+            else if (verbosityLevel <= 5)
+                logLevel = LOG_INFO;
+            else if (verbosityLevel <= 15)
+                logLevel = LOG_DEBUG;
+            else
+                logLevel = LOG_TRACE;
+            logger_->setVerbosity(logLevel);
+
+            if (bnbHardTimeLimitSeconds > 0.0)
+                logger_->setHardTimeLimit(bnbHardTimeLimitSeconds * 1000.0);
+
             this->internalStatus = this->setUpDevice();
         }
+    }
+}
+
+SyphaEnvironment::~SyphaEnvironment()
+{
+    if (logger_)
+    {
+        logger_->flush();
+        delete logger_;
+        logger_ = nullptr;
     }
 }
 
@@ -57,7 +82,7 @@ SyphaStatus SyphaEnvironment::setDefaultParameters()
 SyphaStatus SyphaEnvironment::setUpDevice()
 {
 
-    this->logger("Setting up device", "INFO", 2);
+    logger_->log(LOG_DEBUG, "Setting up CUDA device");
     this->cudaDeviceId = findCudaDevice(this->cudaDeviceId);
 
     return CODE_SUCCESFULL;
@@ -112,11 +137,11 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
 
         if (vm.count("input-file"))
         {
-            cout << "Input file path set to " << vm["input-file"].as<string>() << ".\n";
+            logger_->log(LOG_DEBUG, "Input file: %s", vm["input-file"].as<string>().c_str());
         }
         else
         {
-            cout << "Input file path not set. Exiting.\n";
+            logger_->log(LOG_ERROR, "Input file path not set");
             return CODE_GENERIC_ERROR;
         }
         if (vm.count("model"))
@@ -131,121 +156,65 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
             }
             else
             {
-                cout << "Unsupported model type. Exiting.\n";
+                logger_->log(LOG_ERROR, "Unsupported model type: %s", vm["model"].as<string>().c_str());
                 return CODE_GENERIC_ERROR;
             }
-            cout << "Input model type set to " << vm["model"].as<string>() << ".\n";
+            logger_->log(LOG_DEBUG, "Model type: %s", vm["model"].as<string>().c_str());
         }
         else
         {
-            cout << "Input model type not set. Exiting.\n";
+            logger_->log(LOG_ERROR, "Input model type not set");
             return CODE_GENERIC_ERROR;
         }
         if (vm.count("time-limit"))
-        {
-            cout << "Time limit set to " << vm["time-limit"].as<double>() << ".\n";
-        }
+            logger_->log(LOG_DEBUG, "Time limit: %.3f s", vm["time-limit"].as<double>());
         if (vm.count("seed"))
-        {
-            cout << "Random seed set to " << vm["seed"].as<int>() << ".\n";
-        }
+            logger_->log(LOG_DEBUG, "Random seed: %d", vm["seed"].as<int>());
         if (vm.count("thread"))
-        {
-            cout << "Number of threads set to " << vm["thread"].as<int>() << ".\n";
-        }
-        if (vm.count("tol"))
-        {
-            cout << "Tolerance set to " << vm["tol"].as<double>() << ".\n";
-        }
-        if (vm.count("debug"))
-        {
-            cout << "Debug level set to " << vm["debug"].as<int>() << ".\n";
-        }
-        cout << "Show solution set to " << (this->showSolution ? "true" : "false") << ".\n";
-        if (vm.count("mehrotra-max-iter"))
-        {
-            cout << "Mehrotra max iterations set to " << vm["mehrotra-max-iter"].as<int>() << ".\n";
-        }
-        if (vm.count("dense-memory-threshold"))
-        {
-            cout << "Dense memory threshold set to " << vm["dense-memory-threshold"].as<double>() << ".\n";
-        }
-        if (vm.count("bnb-max-nodes"))
-        {
-            cout << "BnB max nodes set to " << vm["bnb-max-nodes"].as<int>() << ".\n";
-        }
-        if (vm.count("bnb-device-queue"))
-        {
-            cout << "BnB device queue capacity set to " << vm["bnb-device-queue"].as<int>() << ".\n";
-        }
-        if (vm.count("bnb-gap-stall-iters"))
-        {
-            cout << "BnB gap stall iterations set to " << vm["bnb-gap-stall-iters"].as<int>() << ".\n";
-        }
-        if (vm.count("bnb-gap-stall-pct"))
-        {
-            cout << "BnB gap stall min improvement percentage set to " << vm["bnb-gap-stall-pct"].as<double>() << ".\n";
-        }
-        if (vm.count("bnb-int-tol"))
-        {
-            cout << "BnB integrality tolerance set to " << vm["bnb-int-tol"].as<double>() << ".\n";
-        }
-        if (vm.count("bnb-var-select"))
-        {
-            cout << "BnB variable selection strategy set to " << vm["bnb-var-select"].as<string>() << ".\n";
-        }
-        if (vm.count("bnb-int-heur-every"))
-        {
-            cout << "BnB integer heuristic frequency set to " << vm["bnb-int-heur-every"].as<int>() << ".\n";
-        }
-        if (vm.count("bnb-int-heuristics"))
-        {
-            cout << "BnB integer heuristics set to " << vm["bnb-int-heuristics"].as<string>() << ".\n";
-        }
-        if (vm.count("bnb-log-interval-sec"))
-        {
-            cout << "BnB log interval set to " << vm["bnb-log-interval-sec"].as<double>() << " seconds.\n";
-        }
-        if (vm.count("bnb-hard-time-limit-sec"))
-        {
-            cout << "BnB hard time limit set to " << vm["bnb-hard-time-limit-sec"].as<double>() << " seconds.\n";
-        }
-        if (vm.count("preprocess-columns"))
-        {
-            cout << "Preprocess column strategies set to " << vm["preprocess-columns"].as<string>() << ".\n";
-        }
-        cout << "BnB disabled set to " << (this->bnbDisable ? "true" : "false") << ".\n";
-        cout << "BnB auto fallback to LP set to " << (this->bnbAutoFallbackLp ? "true" : "false") << ".\n";
+            logger_->log(LOG_DEBUG, "Threads: %d", vm["thread"].as<int>());
+        logger_->log(LOG_DEBUG, "Tolerance: %g", this->pxTolerance);
+        logger_->log(LOG_DEBUG, "Debug level: %d", this->debugLevel);
+        logger_->log(LOG_DEBUG, "Show solution: %s", this->showSolution ? "true" : "false");
+        logger_->log(LOG_DEBUG, "Mehrotra max iterations: %d", this->mehrotraMaxIter);
+        logger_->log(LOG_DEBUG, "Dense memory threshold: %g", this->denseGpuMemoryFractionThreshold);
+        logger_->log(LOG_DEBUG, "BnB max nodes: %d", this->bnbMaxNodes);
+        logger_->log(LOG_DEBUG, "BnB device queue capacity: %d", this->bnbDeviceQueueCapacity);
+        logger_->log(LOG_DEBUG, "BnB gap stall iterations: %d", this->bnbGapStallBranchIters);
+        logger_->log(LOG_DEBUG, "BnB gap stall min improvement: %.4f%%", this->bnbGapStallMinImprovPct);
+        logger_->log(LOG_DEBUG, "BnB integrality tolerance: %g", this->bnbIntegralityTol);
+        logger_->log(LOG_DEBUG, "BnB variable selection: %s", this->bnbVarSelectionStrategy.c_str());
+        logger_->log(LOG_DEBUG, "BnB heuristic frequency: every %d nodes", this->bnbHeuristicEveryNNodes);
+        logger_->log(LOG_DEBUG, "BnB integer heuristics: %s", this->bnbIntHeuristics.c_str());
+        logger_->log(LOG_DEBUG, "BnB log interval: %.1f s", this->bnbLogIntervalSeconds);
+        logger_->log(LOG_DEBUG, "BnB hard time limit: %.1f s", this->bnbHardTimeLimitSeconds);
+        logger_->log(LOG_DEBUG, "Preprocess columns: %s", this->preprocessColumnStrategies.c_str());
+        logger_->log(LOG_DEBUG, "BnB disabled: %s", this->bnbDisable ? "true" : "false");
+        logger_->log(LOG_DEBUG, "BnB auto fallback LP: %s", this->bnbAutoFallbackLp ? "true" : "false");
         this->denseGpuMemoryFractionThreshold = std::max(0.0, this->denseGpuMemoryFractionThreshold);
     }
     catch (exception &e)
     {
-        cerr << "error: " << e.what() << "\n";
+        if (logger_)
+            logger_->log(LOG_ERROR, "Argument parsing failed: %s", e.what());
+        else
+            fprintf(stderr, "error: %s\n", e.what());
         return CODE_GENERIC_ERROR;
     }
     catch (...)
     {
-        cerr << "Exception of unknown type!\n";
+        if (logger_)
+            logger_->log(LOG_ERROR, "Argument parsing failed: unknown exception");
+        else
+            fprintf(stderr, "Exception of unknown type!\n");
         return CODE_GENERIC_ERROR;
     }
 
     return CODE_SUCCESFULL;
 }
 
-void SyphaEnvironment::logger(string message, string type, int level)
+SyphaLogger *SyphaEnvironment::getLogger()
 {
-    const string colorEnd = "\e[39m";
-    const string colorGreen = "\e[32m";
-    const string colorRed = "\e[31m";
-
-    if (type == "ERROR")
-    {
-        cout << "\e[1m" << colorRed << "[ERROR]" << colorEnd << " " << message << "\e[21m" << std::endl;
-    }
-    else if (type == "INFO" && level < this->verbosityLevel)
-    {
-        cout << colorGreen << "[INFO]" << colorEnd << " " << message << std::endl;
-    }
+    return logger_;
 }
 
 int SyphaEnvironment::getVerbosityLevel()

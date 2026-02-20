@@ -275,7 +275,6 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
     double *d_blockmin_prim = NULL;
     double *d_blockmin_dual = NULL;
     int nBlocksAlpha = 0;
-    char message[1024];
 
     cusparseMatDescr_t A_descr = NULL;
     DenseLinearSolveWorkspace denseLinearWorkspace;
@@ -333,8 +332,8 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
     h_csrAOffs = (int *)calloc(sizeof(int), (A_nrows + 1));
     h_csrAVals = (double *)calloc(sizeof(double), A_nnz);
 
-    sprintf(message, "Matrix: %d x %d, %d non-zeros", A_nrows, A_ncols, A_nnz);
-    node.env->logger(message, "INFO", 17);
+    if (node.env->getLogger())
+        node.env->getLogger()->log(LOG_TRACE, "KKT matrix: %d x %d, %d non-zeros", A_nrows, A_ncols, A_nnz);
 
     // Instantiate the first group of n rows: O | A' | I
     // Use O(nnz) CSR->CSC scatter instead of O(ncols * nnz) column scan.
@@ -451,25 +450,23 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         initializeDenseLinearSolveWorkspace(&denseLinearWorkspace, A_nrows, A_nnz,
                                             d_csrAOffs, d_csrAInds, d_csrAVals,
                                             node.cusparseHandle, node.cusolverDnHandle);
-        if (shouldLogDenseSelection)
+        if (shouldLogDenseSelection && node.env->getLogger())
         {
-            sprintf(message,
+            node.env->getLogger()->log(LOG_INFO,
                     "Using dense linear solver (dense KKT %.2f MB, sparse KKT %.2f MB, threshold %.2f MB)",
                     (double)denseKktBytes / (1024.0 * 1024.0),
                     (double)sparseKktBytes / (1024.0 * 1024.0),
                     (node.env->denseGpuMemoryFractionThreshold * (double)gpuMemTotal) / (1024.0 * 1024.0));
-            node.env->logger(message, "INFO", 5);
         }
     }
     else
     {
-        if (shouldLogDenseSelection)
+        if (shouldLogDenseSelection && node.env->getLogger())
         {
-            sprintf(message,
+            node.env->getLogger()->log(LOG_DEBUG,
                     "Using sparse linear solver (sparse KKT %.2f MB, dense KKT %.2f MB)",
                     (double)sparseKktBytes / (1024.0 * 1024.0),
                     (double)denseKktBytes / (1024.0 * 1024.0));
-            node.env->logger(message, "INFO", 10);
         }
     }
 
@@ -640,7 +637,8 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
 
     ///////////////////             MAIN LOOP
 
-    node.env->logger("Mehrotra procedure started", "INFO", 17);
+    if (node.env->getLogger())
+        node.env->getLogger()->log(LOG_TRACE, "Mehrotra procedure started");
     node.timeSolverStart = node.env->timer();
     const int maxIterations = config.maxIterations > 0 ? config.maxIterations : node.env->mehrotraMaxIter;
     const bool gapStagnationEnabled = config.gapStagnation.enabled && config.gapStagnation.windowIterations > 0 && config.gapStagnation.minImprovementPct >= 0.0;
@@ -652,6 +650,11 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
 
     while ((iterations < maxIterations) && (mu > node.env->mehrotraMuTol))
     {
+        if (node.env->getLogger() && node.env->getLogger()->isStopRequested())
+        {
+            terminationReason = SOLVER_TERM_TIME_LIMIT;
+            break;
+        }
 
         // x, s multiplication: -x.*s on device (was host + 3 full-vector PCIe transfers)
         elem_min_mult_dev(d_x, d_s, d_resXS, node.ncols, node.cudaStream);
@@ -869,10 +872,11 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
 
     if (infeasibleOrNumerical)
     {
-        node.env->logger("LP relaxation flagged as infeasible or numerically unstable", "INFO", 5);
+        if (node.env->getLogger())
+            node.env->getLogger()->log(LOG_INFO, "LP relaxation flagged as infeasible or numerically unstable");
     }
 
-    if (canTrackGpuMem)
+    if (canTrackGpuMem && node.env->getLogger())
     {
         const double toMb = 1024.0 * 1024.0;
         const double freeBeforeMb = (double)gpuMemFreeBeforeKktSetup / toMb;
@@ -880,14 +884,14 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         const double minDuringSolveMb = (double)gpuMemMinDuringLinearSolve / toMb;
         const double setupUsedMb = (double)(gpuMemFreeBeforeKktSetup >= gpuMemFreeAfterKktSetup ? (gpuMemFreeBeforeKktSetup - gpuMemFreeAfterKktSetup) : 0) / toMb;
         const double extraPeakMb = (double)(gpuMemFreeAfterKktSetup >= gpuMemMinDuringLinearSolve ? (gpuMemFreeAfterKktSetup - gpuMemMinDuringLinearSolve) : 0) / toMb;
-        sprintf(message,
-                "GPU memory telemetry (%s): free before KKT %.2f MB, free after setup %.2f MB, min free during solves %.2f MB, setup used %.2f MB, extra solve peak %.2f MB, samples %d",
+        node.env->getLogger()->log(LOG_DEBUG,
+                "GPU memory (%s): free before=%.2f MB, after setup=%.2f MB, min during=%.2f MB, setup=%.2f MB, peak=%.2f MB, samples=%d",
                 useDenseLinearSolve ? "dense" : "sparse",
                 freeBeforeMb, freeAfterSetupMb, minDuringSolveMb, setupUsedMb, extraPeakMb, gpuMemSampleCount);
-        node.env->logger(message, "INFO", 8);
     }
 
-    node.env->logger("Mehrotra procedure finished", "INFO", 10);
+    if (node.env->getLogger())
+        node.env->getLogger()->log(LOG_DEBUG, "Mehrotra procedure finished");
     node.timeSolverEnd = node.env->timer();
 
     if (result != NULL)
@@ -965,7 +969,6 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
     double *d_resC = NULL, *d_resB = NULL, *d_resXS = NULL;
     double *d_x = NULL, *d_y = NULL, *d_s = NULL;
     double *d_delX = NULL, *d_delY = NULL, *d_delS = NULL;
-    char message[1024];
 
     cusparseSpMatDescr_t spMatTransDescr;
     cusparseDnVecDescr_t vecX, vecY, vecResC, vecResB;
@@ -1093,7 +1096,8 @@ SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node)
 
     ///////////////////             MAIN LOOP
 
-    node.env->logger("Mehrotra procedure started", "INFO", 17);
+    if (node.env->getLogger())
+        node.env->getLogger()->log(LOG_TRACE, "Mehrotra procedure started");
     node.timeSolverStart = node.env->timer();
 
     iterations = 0;
@@ -1317,7 +1321,8 @@ SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node)
     cusparseDnMatDescr_t AAT_descr, matDnDescr;
     cusparseMatDescr_t matDescrGen;
 
-    node.env->logger("Mehrotra starting point computation", "INFO", 13);
+    if (node.env->getLogger())
+        node.env->getLogger()->log(LOG_DEBUG, "Computing Mehrotra starting point");
     checkCudaErrors(cusolverDnCreateParams(&cusolverDnParams));
 
     checkCudaErrors(cusparseCreateMatDescr(&matDescrGen));
@@ -1345,7 +1350,8 @@ SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node)
                                         CUSPARSE_ORDER_COL));
 
     ///////////////////             STORE MATRIX IN DENSE FORMAT
-    node.env->logger("Init: storing matrix (dense)", "INFO", 20);
+    if (node.env->getLogger())
+        node.env->getLogger()->log(LOG_TRACE, "Init: storing matrix (dense)");
     size_t szSparseToDense = 0;
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
     checkCudaErrors(cusparseSparseToDense_bufferSize(node.cusparseHandle, node.matDescr, matDnDescr,

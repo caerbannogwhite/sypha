@@ -5,49 +5,44 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
 {
     int i = 0, j = 0, idx = 0, currColNumber = 0, ncolsAS = 0, nnz = 0;
     double val = 0.0;
-    char message[1024];
+    SyphaLogger *log = node.env->getLogger();
 
-    node.env->logger("Start scanning SCP model at " + inputFilePath, "INFO", 10);
+    log->log(LOG_DEBUG, "Scanning SCP model (dense) at %s", inputFilePath.c_str());
     FILE *inputFileHandler = fopen(inputFilePath.c_str(), "r");
     if (inputFileHandler == NULL)
     {
-        node.env->logger("model_reader_read_scp_file_dense: cannot open input file.", "ERROR", 0);
+        log->log(LOG_ERROR, "Failed to open input file: %s", inputFilePath.c_str());
         return CODE_GENERIC_ERROR;
     }
 
-    // OR-Library SCP format: num_rows num_cols
-    // Constraints (elements) are rows, set variables are columns.
     if (!fscanf(inputFileHandler, "%d %d", &node.nrows, &node.ncols))
     {
-        node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
+        log->log(LOG_ERROR, "Failed to parse SCP model dimensions (fscanf)");
         return CODE_GENERIC_ERROR;
     }
 
-    sprintf(message, "Original model has %d rows and %d columns", node.nrows, node.ncols);
-    node.env->logger(message, "INFO", 15);
+    log->log(LOG_TRACE, "Original model: %d rows, %d columns", node.nrows, node.ncols);
 
     ncolsAS = node.ncols + node.nrows;
     node.hObjDns = (double *)calloc(node.ncols + node.nrows, sizeof(double));
     node.hRhsDns = (double *)calloc(node.nrows, sizeof(double));
     node.hMatDns = (double *)calloc(node.nrows * ncolsAS, sizeof(double));
 
-    // read objective
     for (j = 0; j < node.ncols; ++j)
     {
         if (!fscanf(inputFileHandler, "%lf", &val))
         {
-            node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
+            log->log(LOG_ERROR, "Failed to parse objective coefficient at column %d", j);
             return CODE_GENERIC_ERROR;
         }
         node.hObjDns[j] = val;
     }
 
-    // read rows
     for (i = 0; i < node.nrows; ++i)
     {
         if (!fscanf(inputFileHandler, "%d", &currColNumber))
         {
-            node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
+            log->log(LOG_ERROR, "Failed to parse row %d column count", i);
             return CODE_GENERIC_ERROR;
         }
 
@@ -56,7 +51,7 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
         {
             if (!fscanf(inputFileHandler, "%d", &idx))
             {
-                node.env->logger("model_reader_read_scp_file_dense: fscanf failed.", "ERROR", 0);
+                log->log(LOG_ERROR, "Failed to parse column index at row %d", i);
                 return CODE_GENERIC_ERROR;
             }
             node.hMatDns[i * ncolsAS + idx - 1] = 1.0;
@@ -65,7 +60,6 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
 
     fclose(inputFileHandler);
 
-    // add elements in S and rhs
     nnz += node.nrows;
     for (i = 0; i < node.nrows; ++i)
     {
@@ -73,12 +67,10 @@ SyphaStatus model_reader_read_scp_file_dense(SyphaNodeDense &node, string inputF
         node.hMatDns[i * ncolsAS + node.ncols + i] = -1.0;
     }
 
-    // update num cols
     node.nnz = nnz;
-    node.ncolsOriginal = node.ncols; // Save original column count before adding slacks
+    node.ncolsOriginal = node.ncols;
     node.ncols = ncolsAS;
-    sprintf(message, "Model: SCP (dense), %d non-zeros", (nnz - node.nrows));
-    node.env->logger(message, "INFO", 10);
+    log->log(LOG_DEBUG, "Model: SCP (dense), %d non-zeros", (nnz - node.nrows));
 
     return CODE_SUCCESFULL;
 }
@@ -91,44 +83,40 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
 {
     int i, j, idx, currColNumber;
     double val;
-    char message[1024];
+    SyphaLogger *log = node.env->getLogger();
 
-    node.env->logger("Start scanning SCP model at " + inputFilePath, "INFO", 10);
+    log->log(LOG_DEBUG, "Scanning SCP model (sparse COO) at %s", inputFilePath.c_str());
     FILE *inputFileHandler = fopen(inputFilePath.c_str(), "r");
     if (inputFileHandler == NULL)
     {
-        node.env->logger("model_reader_read_scp_file_sparse_coo: cannot open input file.", "ERROR", 0);
+        log->log(LOG_ERROR, "Failed to open input file: %s", inputFilePath.c_str());
         return CODE_GENERIC_ERROR;
     }
 
-    // OR-Library SCP format: num_rows num_cols
-    // Constraints (elements) are rows, set variables are columns.
     if (!fscanf(inputFileHandler, "%d %d", &node.nrows, &node.ncols))
     {
-        node.env->logger("model_reader_read_scp_file_sparse_coo: fscanf failed.", "ERROR", 0);
+        log->log(LOG_ERROR, "Failed to parse SCP model dimensions (fscanf)");
         return CODE_GENERIC_ERROR;
     }
 
     node.hObjDns = (double *)calloc(node.ncols + node.nrows, sizeof(double));
     node.hRhsDns = (double *)calloc(node.nrows, sizeof(double));
 
-    // read objective
     for (j = 0; j < node.ncols; ++j)
     {
         if (!fscanf(inputFileHandler, "%lf", &val))
         {
-            node.env->logger("model_reader_read_scp_file_sparse_coo: fscanf failed.", "ERROR", 0);
+            log->log(LOG_ERROR, "Failed to parse objective coefficient at column %d", j);
             return CODE_GENERIC_ERROR;
         }
         node.hObjDns[j] = val;
     }
 
-    // read rows
     for (i = 0; i < node.nrows; ++i)
     {
         if (!fscanf(inputFileHandler, "%d", &currColNumber))
         {
-            node.env->logger("model_reader_read_scp_file_sparse_coo: fscanf failed.", "ERROR", 0);
+            log->log(LOG_ERROR, "Failed to parse row %d column count", i);
             return CODE_GENERIC_ERROR;
         }
 
@@ -136,7 +124,7 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
         {
             if (!fscanf(inputFileHandler, "%d", &idx))
             {
-                node.env->logger("model_reader_read_scp_file_sparse_coo: fscanf failed.", "ERROR", 0);
+                log->log(LOG_ERROR, "Failed to parse column index at row %d", i);
                 return CODE_GENERIC_ERROR;
             }
 
@@ -147,14 +135,13 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
 
     fclose(inputFileHandler);
 
-    // add S objective and right hand sides
     for (i = 0; i < node.nrows; ++i)
     {
         node.hRhsDns[i] = 1.0;
     }
 
     node.nnz = node.hCooMat->size();
-    node.ncolsOriginal = node.ncols; // Save original column count before adding slacks
+    node.ncolsOriginal = node.ncols;
     node.ncolsInputOriginal = node.ncolsOriginal;
     node.hActiveToInputCols->clear();
     node.hActiveToInputCols->reserve((size_t)node.ncolsOriginal);
@@ -164,8 +151,7 @@ SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string 
     }
     node.ncols = node.ncols + node.nrows;
 
-    sprintf(message, "Model: SCP (sparse COO), %d non-zeros", (node.nnz - node.nrows));
-    node.env->logger(message, "INFO", 10);
+    log->log(LOG_DEBUG, "Model: SCP (sparse COO), %d non-zeros", (node.nnz - node.nrows));
 
     return CODE_SUCCESFULL;
 }
@@ -178,49 +164,44 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
 {
     int i, j, idx, currColNumber;
     double val;
-    char message[1024];
+    SyphaLogger *log = node.env->getLogger();
 
-    node.env->logger("Start scanning SCP model at " + inputFilePath, "INFO", 10);
+    log->log(LOG_DEBUG, "Scanning SCP model (sparse CSR) at %s", inputFilePath.c_str());
     FILE *inputFileHandler = fopen(inputFilePath.c_str(), "r");
     if (inputFileHandler == NULL)
     {
-        node.env->logger("model_reader_read_scp_file_sparse_csr: cannot open input file.", "ERROR", 0);
+        log->log(LOG_ERROR, "Failed to open input file: %s", inputFilePath.c_str());
         return CODE_GENERIC_ERROR;
     }
 
-    // OR-Library SCP format: num_rows num_cols
-    // Constraints (elements) are rows, set variables are columns.
     if (!fscanf(inputFileHandler, "%d %d", &node.nrows, &node.ncols))
     {
-        node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
+        log->log(LOG_ERROR, "Failed to parse SCP model dimensions (fscanf)");
         return CODE_GENERIC_ERROR;
     }
 
     node.hObjDns = (double *)calloc(node.ncols + node.nrows, sizeof(double));
     node.hRhsDns = (double *)calloc(node.nrows, sizeof(double));
 
-    // read objective
-    sprintf(message, "Original model has %d rows and %d columns", node.nrows, node.ncols);
-    node.env->logger(message, "INFO", 15);
-    node.env->logger("Start scanning model objective", "INFO", 20);
+    log->log(LOG_TRACE, "Original model: %d rows, %d columns", node.nrows, node.ncols);
+    log->log(LOG_TRACE, "Scanning model objective");
     for (j = 0; j < node.ncols; ++j)
     {
         if (!fscanf(inputFileHandler, "%lf", &val))
         {
-            node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
+            log->log(LOG_ERROR, "Failed to parse objective coefficient at column %d", j);
             return CODE_GENERIC_ERROR;
         }
         node.hObjDns[j] = val;
     }
 
-    // Read rows directly: each row lists the covering set indices.
-    node.env->logger("Start scanning rows", "INFO", 20);
+    log->log(LOG_TRACE, "Scanning rows");
     node.hCsrMatOffs->push_back(0);
     for (i = 0; i < node.nrows; ++i)
     {
         if (!fscanf(inputFileHandler, "%d", &currColNumber))
         {
-            node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
+            log->log(LOG_ERROR, "Failed to parse row %d column count", i);
             return CODE_GENERIC_ERROR;
         }
 
@@ -228,15 +209,13 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
         {
             if (!fscanf(inputFileHandler, "%d", &idx))
             {
-                node.env->logger("model_reader_read_scp_file_sparse_csr: fscanf failed.", "ERROR", 0);
+                log->log(LOG_ERROR, "Failed to parse column index at row %d", i);
                 return CODE_GENERIC_ERROR;
             }
-            // indices are 1-based in OR-Library files
             node.hCsrMatInds->push_back(idx - 1);
             node.hCsrMatVals->push_back(1.0);
         }
 
-        // Add slack variable entry
         node.hCsrMatInds->push_back(node.ncols + i);
         node.hCsrMatVals->push_back(-1.0);
 
@@ -245,15 +224,14 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
 
     fclose(inputFileHandler);
 
-    node.env->logger("Adding right hand sides", "INFO", 30);
-    // set right hand sides
+    log->log(LOG_TRACE, "Adding right-hand sides");
     for (i = 0; i < node.nrows; ++i)
     {
         node.hRhsDns[i] = 1.0;
     }
 
     node.nnz = node.hCsrMatVals->size();
-    node.ncolsOriginal = node.ncols; // Save original column count before adding slacks
+    node.ncolsOriginal = node.ncols;
     node.ncolsInputOriginal = node.ncolsOriginal;
     node.hActiveToInputCols->clear();
     node.hActiveToInputCols->reserve((size_t)node.ncolsOriginal);
@@ -263,8 +241,7 @@ SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string 
     }
     node.ncols = node.ncols + node.nrows;
 
-    sprintf(message, "Model: SCP (sparse CSR), %d non-zeros", (node.nnz - node.nrows));
-    node.env->logger(message, "INFO", 10);
+    log->log(LOG_DEBUG, "Model: SCP (sparse CSR), %d non-zeros", (node.nnz - node.nrows));
 
     return CODE_SUCCESFULL;
 }
