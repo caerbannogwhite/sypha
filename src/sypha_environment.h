@@ -54,6 +54,7 @@ private:
     string bnbIntHeuristics;
     double bnbLogIntervalSeconds;
     double bnbHardTimeLimitSeconds;
+    int bnbGapStagnationWindow;
     bool bnbDisable;
     bool bnbAutoFallbackLp;
     bool showSolution;

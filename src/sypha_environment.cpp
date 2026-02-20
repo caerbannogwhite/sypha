@@ -71,6 +71,7 @@ SyphaStatus SyphaEnvironment::setDefaultParameters()
     this->bnbIntHeuristics = sypha_environment_defaults::kBnbIntHeuristics();
     this->bnbLogIntervalSeconds = sypha_environment_defaults::kBnbLogIntervalSeconds;
     this->bnbHardTimeLimitSeconds = sypha_environment_defaults::kBnbHardTimeLimitSeconds;
+    this->bnbGapStagnationWindow = sypha_environment_defaults::kBnbGapStagnationWindow;
     this->bnbDisable = sypha_environment_defaults::kBnbDisable;
     this->bnbAutoFallbackLp = sypha_environment_defaults::kBnbAutoFallbackLp;
     this->showSolution = sypha_environment_defaults::kShowSolution;
@@ -123,6 +124,7 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
             ("bnb-int-heuristics", po::value<string>(&this->bnbIntHeuristics)->default_value(sypha_environment_defaults::kBnbIntHeuristics()), "comma-separated integer heuristics")
             ("bnb-log-interval-sec", po::value<double>(&this->bnbLogIntervalSeconds)->default_value(sypha_environment_defaults::kBnbLogIntervalSeconds), "seconds between branch-and-bound progress logs (<=0 disables)")
             ("bnb-hard-time-limit-sec", po::value<double>(&this->bnbHardTimeLimitSeconds)->default_value(sypha_environment_defaults::kBnbHardTimeLimitSeconds), "hard time limit for branch-and-bound in seconds (<=0 disables)")
+            ("bnb-gap-stagnation-window", po::value<int>(&this->bnbGapStagnationWindow)->default_value(sypha_environment_defaults::kBnbGapStagnationWindow), "reduce LP iterations when MIP gap stagnates for this many BnB nodes (<=0 disables)")
             ("preprocess-columns", po::value<string>(&this->preprocessColumnStrategies)->default_value(sypha_environment_defaults::kPreprocessColumnStrategies()), "comma-separated preprocessing rules: single_column_dominance,two_column_dominance,none");
 
         po::variables_map vm;
@@ -187,6 +189,7 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         logger_->log(LOG_DEBUG, "BnB integer heuristics: %s", this->bnbIntHeuristics.c_str());
         logger_->log(LOG_DEBUG, "BnB log interval: %.1f s", this->bnbLogIntervalSeconds);
         logger_->log(LOG_DEBUG, "BnB hard time limit: %.1f s", this->bnbHardTimeLimitSeconds);
+        logger_->log(LOG_DEBUG, "BnB gap stagnation window: %d nodes", this->bnbGapStagnationWindow);
         logger_->log(LOG_DEBUG, "Preprocess columns: %s", this->preprocessColumnStrategies.c_str());
         logger_->log(LOG_DEBUG, "BnB disabled: %s", this->bnbDisable ? "true" : "false");
         logger_->log(LOG_DEBUG, "BnB auto fallback LP: %s", this->bnbAutoFallbackLp ? "true" : "false");

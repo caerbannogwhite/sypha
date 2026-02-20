@@ -415,6 +415,15 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     double nextLogMs = bnbStartMs + logIntervalMs;
     bool hardTimeLimitReached = false;
     bool frontierExhausted = false;
+
+    // Adaptive iteration control: reduce LP iterations when MIP gap stagnates.
+    const int gapStagnationWindow = node.env->bnbGapStagnationWindow;
+    const int fullMaxIter = node.env->mehrotraMaxIter;
+    const int reducedMaxIter = std::max(5, fullMaxIter / 3);
+    double bestMipGapSeen = std::numeric_limits<double>::infinity();
+    int nodeAtLastGapImprovement = 0;
+    bool iterationsReduced = false;
+
     auto releaseBaseCopies = [&]() {
         if (d_baseInds)
             checkCudaErrors(cudaFree(d_baseInds));
@@ -562,7 +571,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         }
 
         SolverExecutionConfig config;
-        config.maxIterations = node.env->mehrotraMaxIter;
+        config.maxIterations = iterationsReduced ? reducedMaxIter : fullMaxIter;
         config.gapStagnation.enabled = true;
         config.gapStagnation.windowIterations = node.env->bnbGapStallBranchIters;
         config.gapStagnation.minImprovementPct = node.env->bnbGapStallMinImprovPct;
@@ -601,7 +610,12 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             dualBoundConsistent;
         const double nodeDualBound = (boundIsReliableForPruning) ? result.dualObj : branchNode.parentDualBound;
 
-        if ((processedNodes == 1) || ((heuristicFrequency > 0) && (processedNodes % heuristicFrequency == 0)))
+        const bool dualImproved = boundIsReliableForPruning &&
+            (nodeDualBound > branchNode.parentDualBound + node.env->pxTolerance);
+
+        if ((processedNodes == 1) ||
+            ((heuristicFrequency > 0) && (processedNodes % heuristicFrequency == 0)) ||
+            dualImproved)
         {
             bool incumbentImproved = false;
             for (const auto &heuristic : heuristics)
@@ -623,6 +637,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             }
             if (incumbentImproved)
             {
+                nodeAtLastGapImprovement = processedNodes;
                 pruneFrontier(frontier, nodes, bestIntegerObj, node.env->pxTolerance, log);
 
                 // Mid-BnB column removal.
@@ -650,6 +665,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             if (result.primalObj < bestIntegerObj - node.env->pxTolerance)
             {
                 bestIntegerObj = result.primalObj;
+                nodeAtLastGapImprovement = processedNodes;
                 adoptIncumbentSolution(bestIntegerSolution, result.primalSolution,
                                        base.ncolsOriginal, ncolsInputOriginal, base.activeToOriginalCol);
                 incumbentSource = "exact_node";
@@ -698,6 +714,43 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             childOne.parentDualBound = nodeDualBound;
             nodes.push_back(childOne);
             frontier.push_back((int)nodes.size() - 1);
+        }
+
+        // Adaptive iteration control: check for MIP gap stagnation.
+        if (gapStagnationWindow > 0 && std::isfinite(bestIntegerObj))
+        {
+            // Periodically recompute global dual bound for accurate gap tracking.
+            const int refreshInterval = std::max(1, gapStagnationWindow / 5);
+            if (processedNodes % refreshInterval == 0)
+            {
+                double newGlobalBound = std::numeric_limits<double>::infinity();
+                for (const int fIdx : frontier)
+                    newGlobalBound = std::min(newGlobalBound, nodes[(size_t)fIdx].parentDualBound);
+                for (size_t wi = deviceWindow.cursorPos(); wi < deviceWindow.windowSize(); ++wi)
+                    newGlobalBound = std::min(newGlobalBound, nodes[(size_t)deviceWindow.peekNodeId(wi)].parentDualBound);
+                if (std::isfinite(newGlobalBound))
+                    globalRelaxLowerBound = newGlobalBound;
+            }
+
+            const double currentGap = compute_mip_gap(bestIntegerObj, globalRelaxLowerBound);
+            if (std::isfinite(currentGap) && currentGap < bestMipGapSeen - 1e-8)
+            {
+                bestMipGapSeen = currentGap;
+                nodeAtLastGapImprovement = processedNodes;
+                if (iterationsReduced)
+                {
+                    iterationsReduced = false;
+                    log->log(LOG_INFO, "MIP gap improved to %.4f%%, restoring LP iterations (%d)",
+                             currentGap * 100.0, fullMaxIter);
+                }
+            }
+
+            if (!iterationsReduced && (processedNodes - nodeAtLastGapImprovement >= gapStagnationWindow))
+            {
+                iterationsReduced = true;
+                log->log(LOG_INFO, "MIP gap stagnant for %d nodes, reducing LP iterations: %d -> %d",
+                         gapStagnationWindow, fullMaxIter, reducedMaxIter);
+            }
         }
     }
 

@@ -26,6 +26,7 @@ constexpr double kBnbIntegralityTol = 1e-6;
 constexpr int kBnbHeuristicEveryNNodes = 1;
 constexpr double kBnbLogIntervalSeconds = 5.0;
 constexpr double kBnbHardTimeLimitSeconds = 0.0;
+constexpr int kBnbGapStagnationWindow = 50;
 constexpr bool kBnbDisable = false;
 constexpr bool kBnbAutoFallbackLp = true;
 constexpr bool kShowSolution = false;
