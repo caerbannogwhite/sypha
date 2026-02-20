@@ -2,6 +2,7 @@
 #include "sypha_solver.h"
 #include "sypha_solver_bnb.h"
 #include "sypha_solver_heuristics.h"
+#include "sypha_preprocessor.h"
 #include "sypha_node_sparse.h"
 
 #include "sypha_cuda_helper.h"
@@ -15,6 +16,103 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+// Helper: convert a heuristic/LP solution (in active-column space of a base model)
+// to input-original column space.
+static void adoptIncumbentSolution(
+    std::vector<double> &bestIntegerSolution,
+    const std::vector<double> &activeSolution,
+    int ncolsOriginal,
+    int ncolsInputOriginal,
+    const std::vector<int> &activeToOriginalCol)
+{
+    bestIntegerSolution.assign((size_t)ncolsInputOriginal, 0.0);
+    const int copyCols = std::min(ncolsOriginal, (int)activeSolution.size());
+    for (int j = 0; j < copyCols; ++j)
+    {
+        if (activeSolution[(size_t)j] > 0.5)
+        {
+            const int origCol = activeToOriginalCol[(size_t)j];
+            if (origCol >= 0 && origCol < ncolsInputOriginal)
+            {
+                bestIntegerSolution[(size_t)origCol] = 1.0;
+            }
+        }
+    }
+}
+
+// Helper: prune frontier nodes dominated by incumbent.
+static void pruneFrontier(
+    std::deque<int> &frontier,
+    const std::vector<BranchNodeState> &nodes,
+    double bestIntegerObj,
+    double tol,
+    SyphaLogger *log)
+{
+    const double pruneBound = bestIntegerObj - tol;
+    size_t before = frontier.size();
+    std::deque<int> surviving;
+    for (const int fIdx : frontier)
+    {
+        if (nodes[(size_t)fIdx].parentDualBound < pruneBound)
+        {
+            surviving.push_back(fIdx);
+        }
+    }
+    frontier.swap(surviving);
+    if (frontier.size() < before)
+    {
+        log->log(LOG_INFO, "Frontier pruned: %zu -> %zu nodes", before, frontier.size());
+    }
+}
+
+// refreshNodeFromBase is defined as a lambda inside solver_sparse_branch_and_bound
+// (requires friend access to SyphaNodeSparse private members).
+
+// Helper: mid-BnB column removal when incumbent improves.
+// Returns number of columns removed.
+static int midBnbColumnRemoval(
+    BaseRelaxationModel &base,
+    double bestIntegerObj,
+    double tol,
+    std::deque<int> &frontier,
+    std::vector<BranchNodeState> &nodes,
+    DeviceNodeWindow &deviceWindow,
+    SyphaLogger *log)
+{
+    BaseModelReductionResult reduction = reduce_base_model(base, bestIntegerObj, tol);
+    if (reduction.columnsRemoved <= 0)
+        return 0;
+
+    log->log(LOG_INFO, "Mid-BnB reduction: %d cols removed, %d remaining",
+             reduction.columnsRemoved, base.ncolsOriginal);
+
+    // Remap frontier nodes.
+    {
+        std::deque<int> surviving;
+        for (const int fIdx : frontier)
+        {
+            if (remap_branch_node(nodes[(size_t)fIdx], reduction.oldToNew))
+            {
+                surviving.push_back(fIdx);
+            }
+        }
+        frontier.swap(surviving);
+    }
+
+    // Remap buffered device window nodes (not yet processed).
+    for (size_t wi = deviceWindow.cursorPos(); wi < deviceWindow.windowSize(); ++wi)
+    {
+        const int bufferedId = deviceWindow.peekNodeId(wi);
+        if (!remap_branch_node(nodes[(size_t)bufferedId], reduction.oldToNew))
+        {
+            // Mark infeasible: will be pruned by bound check.
+            nodes[(size_t)bufferedId].parentDualBound = std::numeric_limits<double>::infinity();
+        }
+    }
+
+    return reduction.columnsRemoved;
+}
 
 SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
 {
@@ -44,20 +142,138 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         }
     };
 
-    const int originalRowsForPreprocess = node.nrows;
+    // Lambda to refresh node host data and device copies from base model after mid-BnB reduction.
+    // Must be a lambda (not static function) to access SyphaNodeSparse private members via friend.
+    auto refreshNodeFromBase = [&](const BaseRelaxationModel &base,
+                                   int *&d_baseInds,
+                                   int *&d_baseOffs,
+                                   double *&d_baseVals) -> SyphaStatus {
+        node.nrows = base.nrows;
+        node.ncols = base.ncols;
+        node.ncolsOriginal = base.ncolsOriginal;
+        node.nnz = base.nnz;
+
+        *node.hCsrMatInds = base.csrInds;
+        *node.hCsrMatOffs = base.csrOffs;
+        *node.hCsrMatVals = base.csrVals;
+
+        if (node.hObjDns)
+        {
+            free(node.hObjDns);
+            node.hObjDns = NULL;
+        }
+        if (node.hRhsDns)
+        {
+            free(node.hRhsDns);
+            node.hRhsDns = NULL;
+        }
+        node.hObjDns = (double *)calloc((size_t)base.ncols, sizeof(double));
+        node.hRhsDns = (double *)calloc((size_t)base.nrows, sizeof(double));
+        memcpy(node.hObjDns, base.obj.data(), sizeof(double) * (size_t)base.ncols);
+        memcpy(node.hRhsDns, base.rhs.data(), sizeof(double) * (size_t)base.nrows);
+
+        if (node.copyModelOnDevice() != CODE_SUCCESFULL)
+        {
+            return CODE_GENERIC_ERROR;
+        }
+
+        // Refresh device base copies.
+        if (d_baseInds)
+            checkCudaErrors(cudaFree(d_baseInds));
+        if (d_baseOffs)
+            checkCudaErrors(cudaFree(d_baseOffs));
+        if (d_baseVals)
+            checkCudaErrors(cudaFree(d_baseVals));
+        d_baseInds = NULL;
+        d_baseOffs = NULL;
+        d_baseVals = NULL;
+
+        if (node.dCsrMatInds && node.dCsrMatOffs && node.dCsrMatVals)
+        {
+            checkCudaErrors(cudaMalloc((void **)&d_baseInds, sizeof(int) * (size_t)base.nnz));
+            checkCudaErrors(cudaMalloc((void **)&d_baseOffs, sizeof(int) * (size_t)(base.nrows + 1)));
+            checkCudaErrors(cudaMalloc((void **)&d_baseVals, sizeof(double) * (size_t)base.nnz));
+            checkCudaErrors(cudaMemcpy(d_baseInds, node.dCsrMatInds, sizeof(int) * (size_t)base.nnz, cudaMemcpyDeviceToDevice));
+            checkCudaErrors(cudaMemcpy(d_baseOffs, node.dCsrMatOffs, sizeof(int) * (size_t)(base.nrows + 1), cudaMemcpyDeviceToDevice));
+            checkCudaErrors(cudaMemcpy(d_baseVals, node.dCsrMatVals, sizeof(double) * (size_t)base.nnz, cudaMemcpyDeviceToDevice));
+        }
+
+        return CODE_SUCCESFULL;
+    };
+
     const int originalColsForPreprocess = node.ncolsOriginal;
     const int originalNnzForPreprocess = node.nnz;
+
+    // Determine ncolsInputOriginal early for incumbent storage.
+    if (node.ncolsInputOriginal <= 0)
+        node.ncolsInputOriginal = node.ncolsOriginal;
+    const int ncolsInputOriginal = node.ncolsInputOriginal;
 
     std::vector<std::unique_ptr<IIntegerHeuristic>> heuristics = makeIntegerHeuristics(node.env->bnbIntHeuristics);
     const int heuristicFrequency = node.env->bnbHeuristicEveryNNodes > 0 ? node.env->bnbHeuristicEveryNNodes : 10;
     const double integralityTol = node.env->bnbIntegralityTol;
 
     double bestIntegerObj = std::numeric_limits<double>::infinity();
+    // Stored in input-original column space (size = ncolsInputOriginal).
     std::vector<double> bestIntegerSolution;
     std::string incumbentSource = "none";
     double globalRelaxLowerBound = std::numeric_limits<double>::infinity();
 
+    // ====================================================================
+    // Phase 1: Greedy set cover heuristic (CPU, O(n log n + nnz))
+    // ====================================================================
+    log->log(LOG_INFO, "BnB preprocessing: running greedy set cover heuristic");
+    {
+        GreedySetCoverResult greedyResult = greedy_set_cover_heuristic(
+            node.nrows, node.ncolsOriginal,
+            *node.hCsrMatInds, *node.hCsrMatOffs, *node.hCsrMatVals,
+            node.hObjDns);
+        if (greedyResult.feasible)
+        {
+            bestIntegerObj = greedyResult.objective;
+            bestIntegerSolution.assign((size_t)ncolsInputOriginal, 0.0);
+            // Map from current active column space to input-original space.
+            for (int col : greedyResult.selectedColumns)
+            {
+                int inputCol = col;
+                if (node.hActiveToInputCols && !node.hActiveToInputCols->empty())
+                    inputCol = (*node.hActiveToInputCols)[(size_t)col];
+                if (inputCol >= 0 && inputCol < ncolsInputOriginal)
+                    bestIntegerSolution[(size_t)inputCol] = 1.0;
+            }
+            incumbentSource = "greedy_set_cover";
+            log->log(LOG_INFO, "Greedy heuristic incumbent: %.12g", bestIntegerObj);
+        }
+        else
+        {
+            log->log(LOG_INFO, "Greedy heuristic did not find a feasible cover");
+        }
+    }
+
+    // ====================================================================
+    // Phase 2: First column removal using greedy incumbent
+    // ====================================================================
+    if (std::isfinite(bestIntegerObj))
+    {
+        const int colsBefore = node.ncolsOriginal;
+        node.reduceByIncumbent(bestIntegerObj);
+        if (node.ncolsOriginal < colsBefore)
+        {
+            log->log(LOG_INFO, "Greedy reduction: cols %d->%d, nnz %d->%d",
+                     colsBefore, node.ncolsOriginal,
+                     originalNnzForPreprocess, node.nnz);
+        }
+    }
+
+    // ====================================================================
+    // Phase 3: Root LP on reduced model
+    // ====================================================================
     log->log(LOG_INFO, "BnB preprocessing: solving root LP relaxation");
+    if (node.copyModelOnDevice() != CODE_SUCCESFULL)
+    {
+        return CODE_GENERIC_ERROR;
+    }
+
     SolverExecutionConfig presolveConfig;
     presolveConfig.maxIterations = node.env->mehrotraMaxIter;
     presolveConfig.gapStagnation.enabled = false;
@@ -78,7 +294,8 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             if (heuristicRes.feasible && heuristicRes.objective < bestIntegerObj - node.env->pxTolerance)
             {
                 bestIntegerObj = heuristicRes.objective;
-                bestIntegerSolution = heuristicRes.solution;
+                adoptIncumbentSolution(bestIntegerSolution, heuristicRes.solution,
+                                       rootBase.ncolsOriginal, ncolsInputOriginal, rootBase.activeToOriginalCol);
                 incumbentSource = std::string("presolve_") + heuristicRes.name;
             }
         }
@@ -88,8 +305,8 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             (presolveResult.primalObj < bestIntegerObj - node.env->pxTolerance))
         {
             bestIntegerObj = presolveResult.primalObj;
-            bestIntegerSolution.assign(presolveResult.primalSolution.begin(),
-                                       presolveResult.primalSolution.begin() + rootBase.ncolsOriginal);
+            adoptIncumbentSolution(bestIntegerSolution, presolveResult.primalSolution,
+                                   rootBase.ncolsOriginal, ncolsInputOriginal, rootBase.activeToOriginalCol);
             incumbentSource = "presolve_exact_root_lp";
         }
 
@@ -107,20 +324,35 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         log->log(LOG_INFO, "Root LP did not converge, continuing without incumbent bound");
     }
 
-    const SyphaStatus preprocessStatus = node.preprocessModel(bestIntegerObj);
-    if (preprocessStatus != CODE_SUCCESFULL)
+    // ====================================================================
+    // Phase 4: Second column removal with improved incumbent
+    // ====================================================================
+    if (std::isfinite(bestIntegerObj))
     {
-        return preprocessStatus;
+        const int colsBefore = node.ncolsOriginal;
+        node.reduceByIncumbent(bestIntegerObj);
+        if (node.ncolsOriginal < colsBefore)
+        {
+            log->log(LOG_INFO, "LP heuristic reduction: cols %d->%d", colsBefore, node.ncolsOriginal);
+        }
     }
-    log->log(LOG_INFO, "Preprocessing: rows %d->%d, cols %d->%d, nnz %d->%d",
-            originalRowsForPreprocess, node.nrows,
-            originalColsForPreprocess, node.ncolsOriginal,
-            originalNnzForPreprocess, node.nnz);
+
+    // ====================================================================
+    // Phase 5: Dominance rules on further-reduced model
+    // ====================================================================
+    node.applyDominancePreprocessing();
+
+    log->log(LOG_INFO, "Preprocessing: cols %d->%d, nnz %d->%d",
+             originalColsForPreprocess, node.ncolsOriginal,
+             originalNnzForPreprocess, node.nnz);
     if (std::isfinite(bestIntegerObj))
     {
         log->log(LOG_INFO, "Preprocessing incumbent from %s: %.12g", incumbentSource.c_str(), bestIntegerObj);
     }
 
+    // ====================================================================
+    // Phase 6: Build base model for BnB
+    // ====================================================================
     if (node.copyModelOnDevice() != CODE_SUCCESFULL)
     {
         return CODE_GENERIC_ERROR;
@@ -174,10 +406,6 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     int processedNodes = 0;
     int totalLpIterations = 0;
     bool gapToleranceReached = false;
-    // The IPM cannot prove LP bounds tighter than muTol. The global dual
-    // bound is the *minimum* over several imprecise LP duals, so the MIP
-    // gap can slightly exceed muTol even at true optimality. Use 2*muTol
-    // to account for this aggregation effect.
     const double mipGapTolerance = 2.0 * node.env->mehrotraMuTol;
     log->log(LOG_INFO, "Branch-and-bound started");
     node.timeSolverStart = node.env->timer();
@@ -199,6 +427,9 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         d_baseVals = NULL;
     };
 
+    // ====================================================================
+    // BnB main loop
+    // ====================================================================
     while (processedNodes < node.env->bnbMaxNodes)
     {
         const double loopNowMs = node.env->timer();
@@ -227,15 +458,12 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         }
         if ((logIntervalMs > 0.0) && (loopNowMs >= nextLogMs))
         {
-            // Recompute global dual bound from open frontier before logging.
             {
                 double newGlobalBound = std::numeric_limits<double>::infinity();
                 for (const int fIdx : frontier)
                 {
                     newGlobalBound = std::min(newGlobalBound, nodes[(size_t)fIdx].parentDualBound);
                 }
-                // Also consider nodes buffered in the device window that
-                // have already been popped from the frontier.
                 for (size_t wi = deviceWindow.cursorPos(); wi < deviceWindow.windowSize(); ++wi)
                 {
                     const int bufferedNodeId = deviceWindow.peekNodeId(wi);
@@ -247,7 +475,6 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                 }
                 else if (frontier.empty() && !deviceWindow.hasBufferedNode())
                 {
-                    // No open nodes remain: dual bound = incumbent.
                     globalRelaxLowerBound = bestIntegerObj;
                 }
             }
@@ -291,7 +518,6 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
 
         const BranchNodeState branchNode = nodes[(size_t)entry.nodeId];
 
-        // Prune before LP solve: if parent dual bound already >= incumbent, skip.
         if (branchNode.parentDualBound >= bestIntegerObj - node.env->pxTolerance)
         {
             continue;
@@ -365,8 +591,6 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
 
         ++processedNodes;
         totalLpIterations += result.iterations;
-        // For minimization, dual objective is the valid node lower bound.
-        // Only trust it when the node LP converged and dual<=primal (within tolerance).
         const bool dualBoundConsistent =
             std::isfinite(result.dualObj) &&
             std::isfinite(result.primalObj) &&
@@ -386,7 +610,8 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                 if (heuristicRes.feasible && heuristicRes.objective < bestIntegerObj - node.env->pxTolerance)
                 {
                     bestIntegerObj = heuristicRes.objective;
-                    bestIntegerSolution = heuristicRes.solution;
+                    adoptIncumbentSolution(bestIntegerSolution, heuristicRes.solution,
+                                           base.ncolsOriginal, ncolsInputOriginal, base.activeToOriginalCol);
                     incumbentSource = heuristicRes.name;
                     incumbentImproved = true;
                     if (node.env->showSolution)
@@ -396,23 +621,20 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                     break;
                 }
             }
-            // Prune frontier nodes dominated by the new incumbent.
             if (incumbentImproved)
             {
-                const double pruneBound = bestIntegerObj - node.env->pxTolerance;
-                size_t before = frontier.size();
-                std::deque<int> surviving;
-                for (const int fIdx : frontier)
+                pruneFrontier(frontier, nodes, bestIntegerObj, node.env->pxTolerance, log);
+
+                // Mid-BnB column removal.
+                if (midBnbColumnRemoval(base, bestIntegerObj, node.env->pxTolerance,
+                                        frontier, nodes, deviceWindow, log) > 0)
                 {
-                    if (nodes[(size_t)fIdx].parentDualBound < pruneBound)
+                    if (refreshNodeFromBase(base, d_baseInds, d_baseOffs, d_baseVals) != CODE_SUCCESFULL)
                     {
-                        surviving.push_back(fIdx);
+                        releaseIpmWorkspace(&ipmWorkspace);
+                        releaseBaseCopies();
+                        return CODE_GENERIC_ERROR;
                     }
-                }
-                frontier.swap(surviving);
-                if (frontier.size() < before)
-                {
-                    log->log(LOG_INFO, "Frontier pruned: %zu -> %zu nodes", before, frontier.size());
                 }
             }
         }
@@ -428,23 +650,22 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             if (result.primalObj < bestIntegerObj - node.env->pxTolerance)
             {
                 bestIntegerObj = result.primalObj;
-                bestIntegerSolution = result.primalSolution;
+                adoptIncumbentSolution(bestIntegerSolution, result.primalSolution,
+                                       base.ncolsOriginal, ncolsInputOriginal, base.activeToOriginalCol);
                 incumbentSource = "exact_node";
-                // Prune frontier nodes dominated by the new incumbent.
-                const double pruneBound = bestIntegerObj - node.env->pxTolerance;
-                size_t before = frontier.size();
-                std::deque<int> surviving;
-                for (const int fIdx : frontier)
+
+                pruneFrontier(frontier, nodes, bestIntegerObj, node.env->pxTolerance, log);
+
+                // Mid-BnB column removal.
+                if (midBnbColumnRemoval(base, bestIntegerObj, node.env->pxTolerance,
+                                        frontier, nodes, deviceWindow, log) > 0)
                 {
-                    if (nodes[(size_t)fIdx].parentDualBound < pruneBound)
+                    if (refreshNodeFromBase(base, d_baseInds, d_baseOffs, d_baseVals) != CODE_SUCCESFULL)
                     {
-                        surviving.push_back(fIdx);
+                        releaseIpmWorkspace(&ipmWorkspace);
+                        releaseBaseCopies();
+                        return CODE_GENERIC_ERROR;
                     }
-                }
-                frontier.swap(surviving);
-                if (frontier.size() < before)
-                {
-                    log->log(LOG_INFO, "Frontier pruned: %zu -> %zu nodes", before, frontier.size());
                 }
             }
             continue;
@@ -511,16 +732,10 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             free(node.hX);
             node.hX = NULL;
         }
-        node.hX = (double *)calloc((size_t)base.ncolsInputOriginal, sizeof(double));
-        const int copyCols = std::min(base.ncolsOriginal, (int)bestIntegerSolution.size());
-        for (int j = 0; j < copyCols; ++j)
-        {
-            const int origCol = base.activeToOriginalCol[(size_t)j];
-            if (origCol >= 0 && origCol < base.ncolsInputOriginal)
-            {
-                node.hX[(size_t)origCol] = bestIntegerSolution[(size_t)j];
-            }
-        }
+        // bestIntegerSolution is already in input-original column space.
+        node.hX = (double *)calloc((size_t)ncolsInputOriginal, sizeof(double));
+        const int copyCols = std::min(ncolsInputOriginal, (int)bestIntegerSolution.size());
+        memcpy(node.hX, bestIntegerSolution.data(), sizeof(double) * (size_t)copyCols);
     }
     else
     {
@@ -531,8 +746,6 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         !hardTimeLimitReached &&
         (processedNodes < node.env->bnbMaxNodes))
     {
-        // Optimality proven: either the frontier is exhausted or the MIP gap
-        // has closed to within the LP solver's numerical precision.
         node.objvalDual = bestIntegerObj;
         node.mipGap = 0.0;
         if (!gapToleranceReached)
@@ -553,13 +766,12 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         if (node.env->showSolution)
         {
             log->log(LOG_INFO, "  Source: %s", incumbentSource.c_str());
-            const int logCols = std::min(base.ncolsOriginal, (int)bestIntegerSolution.size());
-            for (int j = 0; j < logCols; ++j)
+            // bestIntegerSolution is in input-original space.
+            for (int j = 0; j < ncolsInputOriginal; ++j)
             {
                 if (bestIntegerSolution[(size_t)j] > 0.5)
                 {
-                    const int origCol = base.activeToOriginalCol[(size_t)j];
-                    log->log(LOG_INFO, "  x[%d] = %.0f", origCol, bestIntegerSolution[(size_t)j]);
+                    log->log(LOG_INFO, "  x[%d] = 1", j);
                 }
             }
         }
@@ -575,31 +787,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         {
             log->log(LOG_INFO, "Falling back to LP relaxation solve");
 
-            node.nrows = base.nrows;
-            node.ncols = base.ncols;
-            node.ncolsOriginal = base.ncolsOriginal;
-            node.nnz = base.nnz;
-
-            *node.hCsrMatInds = base.csrInds;
-            *node.hCsrMatOffs = base.csrOffs;
-            *node.hCsrMatVals = base.csrVals;
-
-            if (node.hObjDns)
-            {
-                free(node.hObjDns);
-                node.hObjDns = NULL;
-            }
-            if (node.hRhsDns)
-            {
-                free(node.hRhsDns);
-                node.hRhsDns = NULL;
-            }
-            node.hObjDns = (double *)calloc((size_t)node.ncols, sizeof(double));
-            node.hRhsDns = (double *)calloc((size_t)node.nrows, sizeof(double));
-            memcpy(node.hObjDns, base.obj.data(), sizeof(double) * (size_t)node.ncols);
-            memcpy(node.hRhsDns, base.rhs.data(), sizeof(double) * (size_t)node.nrows);
-
-            if (node.copyModelOnDevice() != CODE_SUCCESFULL)
+            if (refreshNodeFromBase(base, d_baseInds, d_baseOffs, d_baseVals) != CODE_SUCCESFULL)
             {
                 releaseIpmWorkspace(&ipmWorkspace);
                 releaseBaseCopies();

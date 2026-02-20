@@ -230,11 +230,14 @@ SyphaStatus SyphaNodeSparse::copyModelOnDevice()
 
 SyphaStatus SyphaNodeSparse::preprocessModel(double incumbentUpperBound)
 {
-    if (this->nrows <= 0 || this->ncolsOriginal <= 0 || !this->hObjDns || !this->hCsrMatInds || !this->hCsrMatOffs || !this->hCsrMatVals)
-    {
-        return CODE_SUCCESFULL;
-    }
+    SyphaStatus s = reduceByIncumbent(incumbentUpperBound);
+    if (s != CODE_SUCCESFULL)
+        return s;
+    return applyDominancePreprocessing();
+}
 
+void SyphaNodeSparse::initActiveColTracking()
+{
     if (this->ncolsInputOriginal <= 0)
     {
         this->ncolsInputOriginal = this->ncolsOriginal;
@@ -251,82 +254,14 @@ SyphaStatus SyphaNodeSparse::preprocessModel(double incumbentUpperBound)
             (*this->hActiveToInputCols)[(size_t)j] = j;
         }
     }
+}
 
-    ColumnPreprocessContext ctx;
-    ctx.nrows = this->nrows;
-    ctx.ncols = this->ncolsOriginal;
-    ctx.rowsByColumn.assign((size_t)ctx.ncols, std::vector<int>());
-    ctx.costs.assign(this->hObjDns, this->hObjDns + this->ncolsOriginal);
-    ctx.active.assign((size_t)ctx.ncols, 1);
-
-    for (int i = 0; i < this->nrows; ++i)
-    {
-        const int begin = (*this->hCsrMatOffs)[(size_t)i];
-        const int end = (*this->hCsrMatOffs)[(size_t)i + 1];
-        for (int k = begin; k < end; ++k)
-        {
-            const int col = (*this->hCsrMatInds)[(size_t)k];
-            const double val = (*this->hCsrMatVals)[(size_t)k];
-            if (col >= 0 && col < this->ncolsOriginal && val > this->env->pxTolerance)
-            {
-                ctx.rowsByColumn[(size_t)col].push_back(i);
-            }
-        }
-    }
-
-    int removedByIncumbent = 0;
-    if (std::isfinite(incumbentUpperBound))
-    {
-        for (int oldCol = 0; oldCol < ctx.ncols; ++oldCol)
-        {
-            if (!ctx.active[(size_t)oldCol])
-            {
-                continue;
-            }
-            if (ctx.costs[(size_t)oldCol] + this->env->pxTolerance >= incumbentUpperBound)
-            {
-                ctx.active[(size_t)oldCol] = 0;
-                ++removedByIncumbent;
-            }
-        }
-    }
-
-    std::vector<std::unique_ptr<IColumnPreprocessRule>> rules = makeColumnPreprocessRules(this->env->preprocessColumnStrategies);
-    int removedByRules = 0;
-    for (const std::unique_ptr<IColumnPreprocessRule> &rule : rules)
-    {
-        removedByRules += rule->apply(ctx, this->env->pxTolerance);
-    }
-
-    std::vector<int> newActiveToInput;
-    std::vector<int> newToOld;
-    newActiveToInput.reserve((size_t)ctx.ncols);
-    newToOld.reserve((size_t)ctx.ncols);
-    std::vector<int> oldToNew((size_t)ctx.ncols, -1);
-    for (int oldCol = 0; oldCol < ctx.ncols; ++oldCol)
-    {
-        if (!ctx.active[(size_t)oldCol])
-        {
-            continue;
-        }
-        const int newCol = (int)newActiveToInput.size();
-        oldToNew[(size_t)oldCol] = newCol;
-        newActiveToInput.push_back((*this->hActiveToInputCols)[(size_t)oldCol]);
-        newToOld.push_back(oldCol);
-    }
-
-    if (newActiveToInput.empty())
-    {
-        this->env->getLogger()->log(LOG_INFO, "Preprocessing removed all columns; keeping original model");
-        return CODE_SUCCESFULL;
-    }
-
-    const int removedColumns = removedByIncumbent + removedByRules;
-    if (removedColumns <= 0)
-    {
-        return CODE_SUCCESFULL;
-    }
-
+void SyphaNodeSparse::rebuildCsrAfterRemoval(
+    const std::vector<int> &oldToNew,
+    const std::vector<int> &newToOld,
+    const std::vector<int> &newActiveToInput,
+    const double *oldCosts)
+{
     const int newOriginalCols = (int)newActiveToInput.size();
     std::vector<int> newCsrInds;
     std::vector<int> newCsrOffs;
@@ -338,8 +273,7 @@ SyphaStatus SyphaNodeSparse::preprocessModel(double incumbentUpperBound)
 
     for (int newCol = 0; newCol < newOriginalCols; ++newCol)
     {
-        const int oldCol = newToOld[(size_t)newCol];
-        newObj[(size_t)newCol] = ctx.costs[(size_t)oldCol];
+        newObj[(size_t)newCol] = oldCosts[(size_t)newToOld[(size_t)newCol]];
     }
 
     for (int i = 0; i < this->nrows; ++i)
@@ -382,9 +316,126 @@ SyphaStatus SyphaNodeSparse::preprocessModel(double incumbentUpperBound)
     this->ncolsOriginal = newOriginalCols;
     this->ncols = newOriginalCols + this->nrows;
     this->nnz = (int)newCsrVals.size();
+}
 
-    this->env->getLogger()->log(LOG_INFO, "Preprocessing removed %d columns (%d by incumbent, %d by rules), remaining %d/%d",
-            removedColumns, removedByIncumbent, removedByRules, this->ncolsOriginal, this->ncolsInputOriginal);
+SyphaStatus SyphaNodeSparse::reduceByIncumbent(double incumbentUpperBound)
+{
+    if (this->nrows <= 0 || this->ncolsOriginal <= 0 || !this->hObjDns ||
+        !this->hCsrMatInds || !this->hCsrMatOffs || !this->hCsrMatVals)
+    {
+        return CODE_SUCCESFULL;
+    }
+    if (!std::isfinite(incumbentUpperBound))
+    {
+        return CODE_SUCCESFULL;
+    }
+
+    initActiveColTracking();
+
+    std::vector<int> newActiveToInput;
+    std::vector<int> newToOld;
+    newActiveToInput.reserve((size_t)this->ncolsOriginal);
+    newToOld.reserve((size_t)this->ncolsOriginal);
+    std::vector<int> oldToNew((size_t)this->ncolsOriginal, -1);
+    int removed = 0;
+
+    for (int oldCol = 0; oldCol < this->ncolsOriginal; ++oldCol)
+    {
+        if (this->hObjDns[oldCol] + this->env->pxTolerance >= incumbentUpperBound)
+        {
+            ++removed;
+            continue;
+        }
+        const int newCol = (int)newActiveToInput.size();
+        oldToNew[(size_t)oldCol] = newCol;
+        newActiveToInput.push_back((*this->hActiveToInputCols)[(size_t)oldCol]);
+        newToOld.push_back(oldCol);
+    }
+
+    if (removed == 0)
+    {
+        return CODE_SUCCESFULL;
+    }
+    if (newActiveToInput.empty())
+    {
+        this->env->getLogger()->log(LOG_INFO, "Preprocessing removed all columns; keeping original model");
+        return CODE_SUCCESFULL;
+    }
+
+    std::vector<double> oldCosts(this->hObjDns, this->hObjDns + this->ncolsOriginal);
+    rebuildCsrAfterRemoval(oldToNew, newToOld, newActiveToInput, oldCosts.data());
+
+    return CODE_SUCCESFULL;
+}
+
+SyphaStatus SyphaNodeSparse::applyDominancePreprocessing()
+{
+    if (this->nrows <= 0 || this->ncolsOriginal <= 0 || !this->hObjDns ||
+        !this->hCsrMatInds || !this->hCsrMatOffs || !this->hCsrMatVals)
+    {
+        return CODE_SUCCESFULL;
+    }
+
+    initActiveColTracking();
+
+    ColumnPreprocessContext ctx;
+    ctx.nrows = this->nrows;
+    ctx.ncols = this->ncolsOriginal;
+    ctx.rowsByColumn.assign((size_t)ctx.ncols, std::vector<int>());
+    ctx.costs.assign(this->hObjDns, this->hObjDns + this->ncolsOriginal);
+    ctx.active.assign((size_t)ctx.ncols, 1);
+
+    for (int i = 0; i < this->nrows; ++i)
+    {
+        const int begin = (*this->hCsrMatOffs)[(size_t)i];
+        const int end = (*this->hCsrMatOffs)[(size_t)i + 1];
+        for (int k = begin; k < end; ++k)
+        {
+            const int col = (*this->hCsrMatInds)[(size_t)k];
+            const double val = (*this->hCsrMatVals)[(size_t)k];
+            if (col >= 0 && col < this->ncolsOriginal && val > this->env->pxTolerance)
+            {
+                ctx.rowsByColumn[(size_t)col].push_back(i);
+            }
+        }
+    }
+
+    std::vector<std::unique_ptr<IColumnPreprocessRule>> rules = makeColumnPreprocessRules(this->env->preprocessColumnStrategies);
+    int removedByRules = 0;
+    for (const std::unique_ptr<IColumnPreprocessRule> &rule : rules)
+    {
+        removedByRules += rule->apply(ctx, this->env->pxTolerance);
+    }
+
+    if (removedByRules <= 0)
+    {
+        return CODE_SUCCESFULL;
+    }
+
+    std::vector<int> newActiveToInput;
+    std::vector<int> newToOld;
+    newActiveToInput.reserve((size_t)ctx.ncols);
+    newToOld.reserve((size_t)ctx.ncols);
+    std::vector<int> oldToNew((size_t)ctx.ncols, -1);
+    for (int oldCol = 0; oldCol < ctx.ncols; ++oldCol)
+    {
+        if (!ctx.active[(size_t)oldCol])
+        {
+            continue;
+        }
+        const int newCol = (int)newActiveToInput.size();
+        oldToNew[(size_t)oldCol] = newCol;
+        newActiveToInput.push_back((*this->hActiveToInputCols)[(size_t)oldCol]);
+        newToOld.push_back(oldCol);
+    }
+
+    if (newActiveToInput.empty())
+    {
+        this->env->getLogger()->log(LOG_INFO, "Dominance rules removed all columns; keeping original model");
+        return CODE_SUCCESFULL;
+    }
+
+    rebuildCsrAfterRemoval(oldToNew, newToOld, newActiveToInput, ctx.costs.data());
 
     return CODE_SUCCESFULL;
 }

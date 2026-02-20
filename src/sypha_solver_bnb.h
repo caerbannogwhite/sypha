@@ -35,6 +35,18 @@ private:
     size_t cursor = 0;
 };
 
+struct BaseModelReductionResult
+{
+    int columnsRemoved = 0;
+    std::vector<int> oldToNew; // oldToNew[oldCol] = newCol or -1 if removed
+};
+
+BaseModelReductionResult reduce_base_model(
+    BaseRelaxationModel &base, double incumbentBound, double tol);
+
+bool remap_branch_node(
+    BranchNodeState &node, const std::vector<int> &oldToNew);
+
 bool append_decision_if_consistent(const BranchNodeState &parent, int var, int value, BranchNodeState *child);
 bool is_binary_integral_solution(const std::vector<double> &x, int ncolsOriginal, double tol);
 std::vector<int> collect_fractional_candidates(const std::vector<double> &x, int ncolsOriginal, double tol);

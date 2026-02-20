@@ -83,6 +83,12 @@ private:
     cusolverSpHandle_t cusolverSpHandle;
 
     SyphaStatus releaseModelOnDevice();
+    void initActiveColTracking();
+    void rebuildCsrAfterRemoval(
+        const std::vector<int> &oldToNew,
+        const std::vector<int> &newToOld,
+        const std::vector<int> &newActiveToInput,
+        const double *oldCosts);
 
 public:
     SyphaNodeSparse(SyphaEnvironment &env);
@@ -101,6 +107,8 @@ public:
     SyphaStatus solve();
     SyphaStatus readModel();
     SyphaStatus preprocessModel(double incumbentUpperBound = std::numeric_limits<double>::infinity());
+    SyphaStatus reduceByIncumbent(double incumbentUpperBound);
+    SyphaStatus applyDominancePreprocessing();
     SyphaStatus copyModelOnDevice();
     SyphaStatus setInitValues();
     SyphaStatus setUpCuda();

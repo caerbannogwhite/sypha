@@ -93,6 +93,113 @@ int DeviceNodeWindow::peekNodeId(size_t index) const
     return hostWindow[index].nodeId;
 }
 
+BaseModelReductionResult reduce_base_model(
+    BaseRelaxationModel &base, double incumbentBound, double tol)
+{
+    BaseModelReductionResult result;
+    result.oldToNew.assign((size_t)base.ncolsOriginal, 0);
+
+    std::vector<int> newToOld;
+    std::vector<int> newActiveToOriginal;
+    int newCol = 0;
+    for (int oldCol = 0; oldCol < base.ncolsOriginal; ++oldCol)
+    {
+        if (base.obj[(size_t)oldCol] + tol >= incumbentBound)
+        {
+            result.oldToNew[(size_t)oldCol] = -1;
+            ++result.columnsRemoved;
+        }
+        else
+        {
+            result.oldToNew[(size_t)oldCol] = newCol;
+            newToOld.push_back(oldCol);
+            newActiveToOriginal.push_back(base.activeToOriginalCol[(size_t)oldCol]);
+            ++newCol;
+        }
+    }
+
+    if (result.columnsRemoved == 0)
+        return result;
+
+    const int newNcolsOriginal = newCol;
+
+    // Rebuild objective
+    std::vector<double> newObj((size_t)(newNcolsOriginal + base.nrows), 0.0);
+    for (int j = 0; j < newNcolsOriginal; ++j)
+        newObj[(size_t)j] = base.obj[(size_t)newToOld[(size_t)j]];
+
+    // Rebuild CSR
+    std::vector<int> newCsrInds;
+    std::vector<int> newCsrOffs;
+    std::vector<double> newCsrVals;
+    newCsrOffs.reserve((size_t)base.nrows + 1);
+    newCsrOffs.push_back(0);
+
+    for (int i = 0; i < base.nrows; ++i)
+    {
+        for (int k = base.csrOffs[(size_t)i]; k < base.csrOffs[(size_t)i + 1]; ++k)
+        {
+            const int oldCol2 = base.csrInds[(size_t)k];
+            const double val = base.csrVals[(size_t)k];
+            if (oldCol2 >= 0 && oldCol2 < base.ncolsOriginal)
+            {
+                const int mapped = result.oldToNew[(size_t)oldCol2];
+                if (mapped >= 0)
+                {
+                    newCsrInds.push_back(mapped);
+                    newCsrVals.push_back(val);
+                }
+            }
+            else if (oldCol2 == base.ncolsOriginal + i)
+            {
+                // Slack column: remap to newNcolsOriginal + i
+                newCsrInds.push_back(newNcolsOriginal + i);
+                newCsrVals.push_back(val);
+            }
+        }
+        newCsrOffs.push_back((int)newCsrVals.size());
+    }
+
+    base.ncolsOriginal = newNcolsOriginal;
+    base.ncols = newNcolsOriginal + base.nrows;
+    base.nnz = (int)newCsrVals.size();
+    base.csrInds = std::move(newCsrInds);
+    base.csrOffs = std::move(newCsrOffs);
+    base.csrVals = std::move(newCsrVals);
+    base.obj = std::move(newObj);
+    base.activeToOriginalCol = std::move(newActiveToOriginal);
+
+    return result;
+}
+
+bool remap_branch_node(BranchNodeState &branchNode, const std::vector<int> &oldToNew)
+{
+    std::vector<BranchDecision> newDecisions;
+    newDecisions.reserve(branchNode.decisions.size());
+    for (const BranchDecision &d : branchNode.decisions)
+    {
+        if (d.varIndex < 0 || d.varIndex >= (int)oldToNew.size())
+        {
+            continue;
+        }
+        const int newVar = oldToNew[(size_t)d.varIndex];
+        if (newVar < 0)
+        {
+            // Column was removed
+            if (d.fixValue == 1)
+            {
+                // Fixed to 1 but column is gone → infeasible
+                return false;
+            }
+            // Fixed to 0, column already removed → redundant, drop
+            continue;
+        }
+        newDecisions.push_back({newVar, d.fixValue});
+    }
+    branchNode.decisions = std::move(newDecisions);
+    return true;
+}
+
 bool append_decision_if_consistent(const BranchNodeState &parent, int var, int value, BranchNodeState *child)
 {
     *child = parent;

@@ -1,9 +1,25 @@
 #ifndef SYPHA_PREPROCESSOR_H
 #define SYPHA_PREPROCESSOR_H
 
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
+
+struct GreedySetCoverResult
+{
+    bool feasible = false;
+    double objective = std::numeric_limits<double>::infinity();
+    std::vector<int> selectedColumns; // indices into current active column space
+};
+
+GreedySetCoverResult greedy_set_cover_heuristic(
+    int nrows,
+    int ncolsOriginal,
+    const std::vector<int> &csrInds,
+    const std::vector<int> &csrOffs,
+    const std::vector<double> &csrVals,
+    const double *objDns);
 
 struct ColumnPreprocessContext
 {

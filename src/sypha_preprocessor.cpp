@@ -8,6 +8,95 @@
 #include <string>
 #include <vector>
 
+GreedySetCoverResult greedy_set_cover_heuristic(
+    int nrows,
+    int ncolsOriginal,
+    const std::vector<int> &csrInds,
+    const std::vector<int> &csrOffs,
+    const std::vector<double> &csrVals,
+    const double *objDns)
+{
+    GreedySetCoverResult result;
+    if (nrows <= 0 || ncolsOriginal <= 0)
+    {
+        return result;
+    }
+
+    // Build rowsByColumn (transpose CSR row→col).
+    std::vector<std::vector<int>> rowsByColumn((size_t)ncolsOriginal);
+    for (int i = 0; i < nrows; ++i)
+    {
+        const int begin = csrOffs[(size_t)i];
+        const int end = csrOffs[(size_t)i + 1];
+        for (int k = begin; k < end; ++k)
+        {
+            const int col = csrInds[(size_t)k];
+            if (col >= 0 && col < ncolsOriginal && csrVals[(size_t)k] > 0.0)
+            {
+                rowsByColumn[(size_t)col].push_back(i);
+            }
+        }
+    }
+
+    // Build sortable list: (cost, -coverageCount, colIndex).
+    struct ColEntry
+    {
+        double cost;
+        int negCoverage;
+        int colIndex;
+    };
+    std::vector<ColEntry> columns((size_t)ncolsOriginal);
+    for (int j = 0; j < ncolsOriginal; ++j)
+    {
+        columns[(size_t)j] = {objDns[j], -(int)rowsByColumn[(size_t)j].size(), j};
+    }
+    std::sort(columns.begin(), columns.end(), [](const ColEntry &a, const ColEntry &b) {
+        if (a.cost != b.cost)
+            return a.cost < b.cost;
+        return a.negCoverage < b.negCoverage; // more coverage first
+    });
+
+    // Greedy scan: include a column if it covers at least one uncovered row.
+    std::vector<char> covered((size_t)nrows, 0);
+    int uncoveredCount = nrows;
+    double totalCost = 0.0;
+
+    for (const ColEntry &entry : columns)
+    {
+        if (uncoveredCount <= 0)
+            break;
+
+        int newCoverage = 0;
+        for (int row : rowsByColumn[(size_t)entry.colIndex])
+        {
+            if (!covered[(size_t)row])
+                ++newCoverage;
+        }
+
+        if (newCoverage > 0)
+        {
+            for (int row : rowsByColumn[(size_t)entry.colIndex])
+            {
+                if (!covered[(size_t)row])
+                {
+                    covered[(size_t)row] = 1;
+                    --uncoveredCount;
+                }
+            }
+            totalCost += entry.cost;
+            result.selectedColumns.push_back(entry.colIndex);
+        }
+    }
+
+    if (uncoveredCount == 0)
+    {
+        result.feasible = true;
+        result.objective = totalCost;
+    }
+
+    return result;
+}
+
 namespace
 {
 bool isSubsetSorted(const std::vector<int> &subset, const std::vector<int> &superset)
