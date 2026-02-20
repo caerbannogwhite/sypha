@@ -109,6 +109,7 @@ public:
     SyphaStatus preprocessModel(double incumbentUpperBound = std::numeric_limits<double>::infinity());
     SyphaStatus reduceByIncumbent(double incumbentUpperBound);
     SyphaStatus applyDominancePreprocessing();
+    SyphaStatus applyCostDrivenReduction();
     SyphaStatus copyModelOnDevice();
     SyphaStatus setInitValues();
     SyphaStatus setUpCuda();

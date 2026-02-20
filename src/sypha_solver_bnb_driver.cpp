@@ -266,6 +266,20 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     }
 
     // ====================================================================
+    // Phase 2.5: Cost-driven pair/triplet column replacement
+    // ====================================================================
+    {
+        const int colsBefore = node.ncolsOriginal;
+        node.applyCostDrivenReduction();
+        if (node.ncolsOriginal < colsBefore)
+        {
+            log->log(LOG_INFO, "Cost-driven pair/triplet reduction: cols %d->%d, nnz %d->%d",
+                     colsBefore, node.ncolsOriginal,
+                     originalNnzForPreprocess, node.nnz);
+        }
+    }
+
+    // ====================================================================
     // Phase 3: Root LP on reduced model
     // ====================================================================
     log->log(LOG_INFO, "BnB preprocessing: solving root LP relaxation");
