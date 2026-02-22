@@ -280,6 +280,20 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     }
 
     // ====================================================================
+    // Phase 2.7: Dominance rules on greedy-reduced model
+    // ====================================================================
+    {
+        const int colsBefore = node.ncolsOriginal;
+        node.applyDominancePreprocessing();
+        if (node.ncolsOriginal < colsBefore)
+        {
+            log->log(LOG_INFO, "Pre-LP dominance reduction: cols %d->%d, nnz %d->%d",
+                     colsBefore, node.ncolsOriginal,
+                     originalNnzForPreprocess, node.nnz);
+        }
+    }
+
+    // ====================================================================
     // Phase 3: Root LP on reduced model
     // ====================================================================
     log->log(LOG_INFO, "BnB preprocessing: solving root LP relaxation");
