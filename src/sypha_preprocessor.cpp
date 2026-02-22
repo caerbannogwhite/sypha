@@ -227,7 +227,7 @@ public:
         int removed = 0;
         for (int target = 0; target < ctx.ncols; ++target)
         {
-            if ((target & 63) == 0 && std::chrono::steady_clock::now() >= ctx.deadline)
+            if (std::chrono::steady_clock::now() >= ctx.deadline)
                 break;
             if (!ctx.active[(size_t)target])
             {
@@ -276,9 +276,10 @@ public:
     int apply(ColumnPreprocessContext &ctx, double tol) const override
     {
         int removed = 0;
-        for (int target = 0; target < ctx.ncols; ++target)
+        bool timedOut = false;
+        for (int target = 0; target < ctx.ncols && !timedOut; ++target)
         {
-            if ((target & 63) == 0 && std::chrono::steady_clock::now() >= ctx.deadline)
+            if (std::chrono::steady_clock::now() >= ctx.deadline)
                 break;
             if (!ctx.active[(size_t)target])
             {
@@ -291,6 +292,11 @@ public:
 
             for (int a = 0; a < ctx.ncols && !dominated; ++a)
             {
+                if ((a & 255) == 0 && std::chrono::steady_clock::now() >= ctx.deadline)
+                {
+                    timedOut = true;
+                    break;
+                }
                 if (a == target || !ctx.active[(size_t)a])
                 {
                     continue;
@@ -365,11 +371,11 @@ public:
 
         int removed = 0;
         std::vector<char> seen((size_t)ctx.ncols, 0);
-        int iter = 0;
+        bool timedOut = false;
 
         for (int target : sortedCols)
         {
-            if ((++iter & 63) == 0 && std::chrono::steady_clock::now() >= ctx.deadline)
+            if (std::chrono::steady_clock::now() >= ctx.deadline)
                 break;
             if (!ctx.active[(size_t)target])
                 continue;
@@ -405,6 +411,11 @@ public:
             // Try pairs.
             for (size_t i = 0; i < candidates.size() && !dominated; ++i)
             {
+                if ((i & 255) == 0 && std::chrono::steady_clock::now() >= ctx.deadline)
+                {
+                    timedOut = true;
+                    break;
+                }
                 const int a = candidates[i];
                 const double costA = ctx.costs[(size_t)a];
                 if (costA > targetCost + tol)
@@ -423,11 +434,19 @@ public:
                 }
             }
 
+            if (timedOut)
+                break;
+
             // Try triplets.
             if (!dominated)
             {
                 for (size_t i = 0; i < candidates.size() && !dominated; ++i)
                 {
+                    if ((i & 63) == 0 && std::chrono::steady_clock::now() >= ctx.deadline)
+                    {
+                        timedOut = true;
+                        break;
+                    }
                     const int a = candidates[i];
                     const double costA = ctx.costs[(size_t)a];
                     if (costA > targetCost + tol)
@@ -454,6 +473,9 @@ public:
                     }
                 }
             }
+
+            if (timedOut)
+                break;
 
             if (dominated)
             {
