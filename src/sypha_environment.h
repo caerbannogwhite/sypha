@@ -59,6 +59,7 @@ private:
     bool bnbAutoFallbackLp;
     bool showSolution;
     string preprocessColumnStrategies;
+    double preprocessTimeLimitSeconds;
 
     SyphaLogger *logger_ = nullptr;
 

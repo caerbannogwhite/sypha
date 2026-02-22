@@ -1,6 +1,7 @@
 #ifndef SYPHA_PREPROCESSOR_H
 #define SYPHA_PREPROCESSOR_H
 
+#include <chrono>
 #include <limits>
 #include <memory>
 #include <string>
@@ -28,6 +29,7 @@ struct ColumnPreprocessContext
     std::vector<std::vector<int>> rowsByColumn;
     std::vector<double> costs;
     std::vector<char> active;
+    std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
 };
 
 class IColumnPreprocessRule

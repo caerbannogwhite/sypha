@@ -76,6 +76,7 @@ SyphaStatus SyphaEnvironment::setDefaultParameters()
     this->bnbAutoFallbackLp = sypha_environment_defaults::kBnbAutoFallbackLp;
     this->showSolution = sypha_environment_defaults::kShowSolution;
     this->preprocessColumnStrategies = sypha_environment_defaults::kPreprocessColumnStrategies();
+    this->preprocessTimeLimitSeconds = sypha_environment_defaults::kPreprocessTimeLimitSeconds;
 
     return CODE_SUCCESFULL;
 }
@@ -125,7 +126,8 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
             ("bnb-log-interval-sec", po::value<double>(&this->bnbLogIntervalSeconds)->default_value(sypha_environment_defaults::kBnbLogIntervalSeconds), "seconds between branch-and-bound progress logs (<=0 disables)")
             ("bnb-hard-time-limit-sec", po::value<double>(&this->bnbHardTimeLimitSeconds)->default_value(sypha_environment_defaults::kBnbHardTimeLimitSeconds), "hard time limit for branch-and-bound in seconds (<=0 disables)")
             ("bnb-gap-stagnation-window", po::value<int>(&this->bnbGapStagnationWindow)->default_value(sypha_environment_defaults::kBnbGapStagnationWindow), "reduce LP iterations when MIP gap stagnates for this many BnB nodes (<=0 disables)")
-            ("preprocess-columns", po::value<string>(&this->preprocessColumnStrategies)->default_value(sypha_environment_defaults::kPreprocessColumnStrategies()), "comma-separated preprocessing rules: single_column_dominance,two_column_dominance,none");
+            ("preprocess-columns", po::value<string>(&this->preprocessColumnStrategies)->default_value(sypha_environment_defaults::kPreprocessColumnStrategies()), "comma-separated preprocessing rules: single_column_dominance,two_column_dominance,none")
+            ("preprocess-time-limit-sec", po::value<double>(&this->preprocessTimeLimitSeconds)->default_value(sypha_environment_defaults::kPreprocessTimeLimitSeconds), "time limit in seconds for column dominance preprocessing (<=0 disables)");
 
         po::variables_map vm;
         po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -191,6 +193,7 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         logger_->log(LOG_DEBUG, "BnB hard time limit: %.1f s", this->bnbHardTimeLimitSeconds);
         logger_->log(LOG_DEBUG, "BnB gap stagnation window: %d nodes", this->bnbGapStagnationWindow);
         logger_->log(LOG_DEBUG, "Preprocess columns: %s", this->preprocessColumnStrategies.c_str());
+        logger_->log(LOG_DEBUG, "Preprocess time limit: %.1f s", this->preprocessTimeLimitSeconds);
         logger_->log(LOG_DEBUG, "BnB disabled: %s", this->bnbDisable ? "true" : "false");
         logger_->log(LOG_DEBUG, "BnB auto fallback LP: %s", this->bnbAutoFallbackLp ? "true" : "false");
         this->denseGpuMemoryFractionThreshold = std::max(0.0, this->denseGpuMemoryFractionThreshold);

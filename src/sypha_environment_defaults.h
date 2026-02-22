@@ -30,6 +30,7 @@ constexpr int kBnbGapStagnationWindow = 50;
 constexpr bool kBnbDisable = false;
 constexpr bool kBnbAutoFallbackLp = true;
 constexpr bool kShowSolution = false;
+constexpr double kPreprocessTimeLimitSeconds = 5.0;
 
 inline const std::string &kBnbVarSelectionStrategy()
 {

@@ -384,6 +384,12 @@ SyphaStatus SyphaNodeSparse::applyDominancePreprocessing()
     ctx.rowsByColumn.assign((size_t)ctx.ncols, std::vector<int>());
     ctx.costs.assign(this->hObjDns, this->hObjDns + this->ncolsOriginal);
     ctx.active.assign((size_t)ctx.ncols, 1);
+    if (this->env->preprocessTimeLimitSeconds > 0.0)
+    {
+        ctx.deadline = std::chrono::steady_clock::now() +
+                       std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                           std::chrono::duration<double>(this->env->preprocessTimeLimitSeconds));
+    }
 
     for (int i = 0; i < this->nrows; ++i)
     {
@@ -456,6 +462,12 @@ SyphaStatus SyphaNodeSparse::applyCostDrivenReduction()
     ctx.rowsByColumn.assign((size_t)ctx.ncols, std::vector<int>());
     ctx.costs.assign(this->hObjDns, this->hObjDns + this->ncolsOriginal);
     ctx.active.assign((size_t)ctx.ncols, 1);
+    if (this->env->preprocessTimeLimitSeconds > 0.0)
+    {
+        ctx.deadline = std::chrono::steady_clock::now() +
+                       std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                           std::chrono::duration<double>(this->env->preprocessTimeLimitSeconds));
+    }
 
     for (int i = 0; i < this->nrows; ++i)
     {

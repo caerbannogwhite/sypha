@@ -227,6 +227,8 @@ public:
         int removed = 0;
         for (int target = 0; target < ctx.ncols; ++target)
         {
+            if ((target & 63) == 0 && std::chrono::steady_clock::now() >= ctx.deadline)
+                break;
             if (!ctx.active[(size_t)target])
             {
                 continue;
@@ -276,6 +278,8 @@ public:
         int removed = 0;
         for (int target = 0; target < ctx.ncols; ++target)
         {
+            if ((target & 63) == 0 && std::chrono::steady_clock::now() >= ctx.deadline)
+                break;
             if (!ctx.active[(size_t)target])
             {
                 continue;
@@ -361,9 +365,12 @@ public:
 
         int removed = 0;
         std::vector<char> seen((size_t)ctx.ncols, 0);
+        int iter = 0;
 
         for (int target : sortedCols)
         {
+            if ((++iter & 63) == 0 && std::chrono::steady_clock::now() >= ctx.deadline)
+                break;
             if (!ctx.active[(size_t)target])
                 continue;
 
