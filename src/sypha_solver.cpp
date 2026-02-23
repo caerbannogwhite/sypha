@@ -461,12 +461,40 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
     }
     else
     {
-        if (shouldLogDenseSelection && node.env->getLogger())
+        // cusolverSpDcsrlsvqr performs a full QR factorization per RHS —
+        // 2 full factorizations per IPM iteration.  Dense LU (factorize once,
+        // solve twice) is significantly faster when GPU memory permits.
+        bool canFitDense = true;
+        if (canTrackGpuMem)
         {
-            node.env->getLogger()->log(LOG_DEBUG,
-                    "Using sparse linear solver (sparse KKT %.2f MB, dense KKT %.2f MB)",
-                    (double)sparseKktBytes / (1024.0 * 1024.0),
-                    (double)denseKktBytes / (1024.0 * 1024.0));
+            size_t freeNow = 0, totalNow = 0;
+            if (cudaMemGetInfo(&freeNow, &totalNow) == cudaSuccess)
+                canFitDense = ((double)denseKktBytes * 1.5 < (double)freeNow);
+        }
+
+        if (canFitDense)
+        {
+            initializeDenseLinearSolveWorkspace(&denseLinearWorkspace, A_nrows, A_nnz,
+                                                d_csrAOffs, d_csrAInds, d_csrAVals,
+                                                node.cusparseHandle, node.cusolverDnHandle);
+            useDenseLinearSolve = true;
+            if (shouldLogDenseSelection && node.env->getLogger())
+            {
+                node.env->getLogger()->log(LOG_INFO,
+                        "Sparse QR -> dense LU factored (dense KKT %.2f MB, sparse KKT %.2f MB)",
+                        (double)denseKktBytes / (1024.0 * 1024.0),
+                        (double)sparseKktBytes / (1024.0 * 1024.0));
+            }
+        }
+        else
+        {
+            if (shouldLogDenseSelection && node.env->getLogger())
+            {
+                node.env->getLogger()->log(LOG_DEBUG,
+                        "Using sparse QR solver (sparse KKT %.2f MB, dense KKT %.2f MB — insufficient GPU memory for dense LU)",
+                        (double)sparseKktBytes / (1024.0 * 1024.0),
+                        (double)denseKktBytes / (1024.0 * 1024.0));
+            }
         }
     }
 
@@ -659,9 +687,10 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         // x, s multiplication: -x.*s on device (was host + 3 full-vector PCIe transfers)
         elem_min_mult_dev(d_x, d_s, d_resXS, node.ncols, node.cudaStream);
 
-        // Dense path: factorize once, then reuse for both affine and corrector solves.
-        // Sparse path: cusolverSpDcsrlsvqr does not expose separate factor/solve, so
-        // we call the monolithic solver for each RHS.
+        // Dense LU path: factorize once, then reuse for both affine and corrector solves.
+        // Sparse QR fallback: cusolverSpDcsrlsvqr does not expose separate factor/solve,
+        // so we call the monolithic solver for each RHS (only used when GPU memory is
+        // insufficient for the dense n*n buffer).
         if (useDenseLinearSolve)
         {
             sampleGpuMemory();
@@ -735,8 +764,8 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         checkCudaErrors(cublasDaxpy(node.cublasHandle, node.ncols,
                                     &alpha, d_bufferX, 1, d_resXS, 1));
 
-        // Solve corrector step (dense: triangular solve reusing LU factors;
-        // sparse: full QR solve — cusolverSpDcsrlsvqr has no separate factor/solve)
+        // Corrector step: dense LU reuses factors (triangular solve only);
+        // sparse QR fallback does another full factorization.
         if (useDenseLinearSolve)
         {
             sampleGpuMemory();
