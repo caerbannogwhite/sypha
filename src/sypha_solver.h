@@ -8,6 +8,7 @@
 
 #include "cusparse.h"
 #include "cusolverDn.h"
+#include "cublas_v2.h"
 
 struct DenseLinearSolveWorkspace
 {
@@ -16,12 +17,18 @@ struct DenseLinearSolveWorkspace
     cusparseSpMatDescr_t sparseMatrix = NULL;
     cusparseDnMatDescr_t denseMatrix = NULL;
     double *dDenseA = NULL;
+    double *dDenseA_template = NULL; // Static KKT template for incremental update
     double *dLuWork = NULL;
     int *dLuPivot = NULL;
     int *dLuInfo = NULL;
     void *dSparseToDenseBuffer = NULL;
     size_t sparseToDenseBufferSize = 0;
     int luWorkSize = 0;
+    bool templateReady = false;
+    int diagSOffset = 0;  // Column-major offset of S diagonal start in dense matrix
+    int diagXOffset = 0;  // Column-major offset of X diagonal start in dense matrix
+    int diagStride = 0;   // Stride between consecutive diagonal elements (nRows + 1)
+    int nDiag = 0;        // Number of diagonal elements to patch (ncols)
 };
 
 void initializeDenseLinearSolveWorkspace(DenseLinearSolveWorkspace *workspace,
@@ -45,6 +52,16 @@ bool solveDenseLinearSystem(DenseLinearSolveWorkspace *workspace,
 bool factorizeDenseLinearSystem(DenseLinearSolveWorkspace *workspace,
                                 cusparseHandle_t cusparseHandle,
                                 cusolverDnHandle_t cusolverDnHandle);
+
+void buildDenseKktTemplate(DenseLinearSolveWorkspace *workspace,
+                            int ncols, int nrows,
+                            cusparseHandle_t cusparseHandle);
+
+bool factorizeDenseLinearSystemIncremental(DenseLinearSolveWorkspace *workspace,
+                                            const double *d_s, const double *d_x,
+                                            cublasHandle_t cublasHandle,
+                                            cusolverDnHandle_t cusolverDnHandle,
+                                            cudaStream_t cudaStream);
 
 bool solveDenseLinearSystemFactored(DenseLinearSolveWorkspace *workspace,
                                      const double *dRhs,
