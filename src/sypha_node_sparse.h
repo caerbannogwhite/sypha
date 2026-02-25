@@ -14,6 +14,7 @@ class SyphaEnvironment;
 struct SolverExecutionConfig;
 struct SolverExecutionResult;
 struct IpmWorkspace;
+namespace sypha { class SolverImpl; }
 
 class SyphaCOOEntry
 {
@@ -123,6 +124,8 @@ public:
     friend SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node);
+
+    friend class sypha::SolverImpl;
 };
 
 #endif // SYPHA_NODE_SPARSE_H

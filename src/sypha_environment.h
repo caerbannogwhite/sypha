@@ -13,6 +13,7 @@
 class SyphaNodeDense;
 class SyphaNodeSparse;
 struct IpmWorkspace;
+namespace sypha { class SolverImpl; }
 
 class SyphaEnvironment
 {
@@ -93,6 +94,7 @@ public:
     friend SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node);
     friend SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node);
 
+    friend class sypha::SolverImpl;
 };
 
 #endif // SYPHA_ENVIRONMENT_H

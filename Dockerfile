@@ -18,13 +18,15 @@ WORKDIR /sypha
 # Copy project files
 COPY Makefile .
 COPY src/ src/
+COPY include/ include/
 COPY data/ data/
+COPY examples/ examples/
 
 # Create bin directory for object files
 RUN mkdir -p bin
 
-# Build (Makefile uses BOOST=/usr and INCLUDES=-Isrc by default)
-RUN make
+# Build main binary and example (Makefile uses BOOST=/usr and INCLUDES=-Isrc -Iinclude by default)
+RUN make && make scp_solver
 
-# Default: run the demo
-CMD ["./sypha", "--verbosity", "100", "--model", "SCP", "--input-file", "data/demo00.txt"]
+# Default: run the demo via the new API
+CMD ["./scp_solver", "data/demo00.txt", "100"]
