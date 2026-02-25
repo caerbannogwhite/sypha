@@ -527,8 +527,7 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         // cusolverSpDcsrlsvqr performs a full QR factorization per RHS —
         // 2 full factorizations per IPM iteration.  Dense LU (factorize once,
         // solve twice) is significantly faster when GPU memory permits.
-        bool canFitDense = true;
-        if (canTrackGpuMem)
+        bool canFitDense = false;
         {
             size_t freeNow = 0, totalNow = 0;
             if (cudaMemGetInfo(&freeNow, &totalNow) == cudaSuccess)
