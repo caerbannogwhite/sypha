@@ -44,6 +44,13 @@ private:
     int mehrotraReorder; /* 0 = no reorder, 1 = fill-reducing reorder for sparse QR */
     double denseGpuMemoryFractionThreshold;
 
+    // Krylov CG solver parameters
+    std::string linearSolverStrategy; // "auto", "dense", "sparse_qr", "krylov"
+    int krylovMaxCgIter;
+    double krylovCgTolInitial;
+    double krylovCgTolFinal;
+    double krylovCgTolDecayRate;
+
     // Branch-and-bound parameters
     int bnbMaxNodes;
     int bnbDeviceQueueCapacity;

@@ -227,9 +227,9 @@ else
 	@echo "Sample is ready - all dependencies have been met"
 endif
 
-LIB_OBJS := bin/common.o bin/model_reader.o bin/sypha_environment.o bin/sypha_logger.o bin/sypha_node_dense.o bin/sypha_node_sparse.o bin/sypha_preprocessor.o bin/sypha_solver.o bin/sypha_solver_bnb.o bin/sypha_solver_bnb_driver.o bin/sypha_solver_heuristics.o bin/sypha_solver_utils.o bin/sypha_api.o
+LIB_OBJS := bin/common.o bin/model_reader.o bin/sypha_environment.o bin/sypha_logger.o bin/sypha_node_dense.o bin/sypha_node_sparse.o bin/sypha_preprocessor.o bin/sypha_solver.o bin/sypha_solver_bnb.o bin/sypha_solver_bnb_driver.o bin/sypha_solver_heuristics.o bin/sypha_solver_utils.o bin/sypha_solver_krylov.o bin/sypha_api.o
 
-sypha : common main model_reader sypha_environment sypha_logger sypha_node_dense sypha_node_sparse sypha_preprocessor sypha_solver sypha_solver_bnb sypha_solver_bnb_driver sypha_solver_heuristics sypha_solver_utils sypha_api
+sypha : common main model_reader sypha_environment sypha_logger sypha_node_dense sypha_node_sparse sypha_preprocessor sypha_solver sypha_solver_bnb sypha_solver_bnb_driver sypha_solver_heuristics sypha_solver_utils sypha_solver_krylov sypha_api
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) bin/main.o $(LIB_OBJS) -o $@ $(LIBRARIES)
 
 common : src/common.cpp
@@ -284,11 +284,15 @@ sypha_solver_utils : src/sypha_solver_utils.cu
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cu $(LIBRARIES)
 	@mv $@.o bin
 
+sypha_solver_krylov : src/sypha_solver_krylov.cu
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cu $(LIBRARIES)
+	@mv $@.o bin
+
 sypha_api : src/sypha_api.cpp
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c src/$@.cpp $(LIBRARIES)
 	@mv $@.o bin
 
-scp_solver : common model_reader sypha_environment sypha_logger sypha_node_dense sypha_node_sparse sypha_preprocessor sypha_solver sypha_solver_bnb sypha_solver_bnb_driver sypha_solver_heuristics sypha_solver_utils sypha_api
+scp_solver : common model_reader sypha_environment sypha_logger sypha_node_dense sypha_node_sparse sypha_preprocessor sypha_solver sypha_solver_bnb sypha_solver_bnb_driver sypha_solver_heuristics sypha_solver_utils sypha_solver_krylov sypha_api
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -c examples/scp_solver.cpp $(LIBRARIES)
 	@mv scp_solver.o bin
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) bin/scp_solver.o $(LIB_OBJS) -o $@ $(LIBRARIES)

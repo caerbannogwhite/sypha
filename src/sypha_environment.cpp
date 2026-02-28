@@ -61,6 +61,12 @@ SyphaStatus SyphaEnvironment::setDefaultParameters()
     this->mehrotraReorder = sypha_environment_defaults::kMehrotraReorder;
     this->denseGpuMemoryFractionThreshold = sypha_environment_defaults::kDenseGpuMemoryFractionThreshold;
 
+    this->linearSolverStrategy = sypha_environment_defaults::kLinearSolverStrategy();
+    this->krylovMaxCgIter = sypha_environment_defaults::kKrylovMaxCgIter;
+    this->krylovCgTolInitial = sypha_environment_defaults::kKrylovCgTolInitial;
+    this->krylovCgTolFinal = sypha_environment_defaults::kKrylovCgTolFinal;
+    this->krylovCgTolDecayRate = sypha_environment_defaults::kKrylovCgTolDecayRate;
+
     this->bnbMaxNodes = sypha_environment_defaults::kBnbMaxNodes;
     this->bnbDeviceQueueCapacity = sypha_environment_defaults::kBnbDeviceQueueCapacity;
     this->bnbGapStallBranchIters = sypha_environment_defaults::kBnbGapStallBranchIters;
@@ -113,6 +119,11 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
             ("show-solution", po::bool_switch(&this->showSolution)->default_value(sypha_environment_defaults::kShowSolution), "show final solution summary")
             ("mehrotra-max-iter", po::value<int>(&this->mehrotraMaxIter)->default_value(sypha_environment_defaults::kMehrotraMaxIter), "set max iterations for Mehrotra IPM")
             ("dense-memory-threshold", po::value<double>(&this->denseGpuMemoryFractionThreshold)->default_value(sypha_environment_defaults::kDenseGpuMemoryFractionThreshold), "use dense KKT solver when dense matrix bytes < this fraction of total GPU memory")
+            ("linear-solver", po::value<string>(&this->linearSolverStrategy)->default_value(sypha_environment_defaults::kLinearSolverStrategy()), "linear solver strategy: auto|dense|sparse_qr|krylov")
+            ("krylov-max-cg-iter", po::value<int>(&this->krylovMaxCgIter)->default_value(sypha_environment_defaults::kKrylovMaxCgIter), "max CG iterations for Krylov solver")
+            ("krylov-cg-tol-initial", po::value<double>(&this->krylovCgTolInitial)->default_value(sypha_environment_defaults::kKrylovCgTolInitial), "initial CG relative tolerance")
+            ("krylov-cg-tol-final", po::value<double>(&this->krylovCgTolFinal)->default_value(sypha_environment_defaults::kKrylovCgTolFinal), "final CG relative tolerance")
+            ("krylov-cg-tol-decay", po::value<double>(&this->krylovCgTolDecayRate)->default_value(sypha_environment_defaults::kKrylovCgTolDecayRate), "CG tolerance decay rate per IPM iteration")
             ("disable-bnb", po::bool_switch(&this->bnbDisable)->default_value(sypha_environment_defaults::kBnbDisable), "disable branch-and-bound and solve LP relaxation only")
             ("bnb-auto-fallback-lp", po::value<bool>(&this->bnbAutoFallbackLp)->default_value(sypha_environment_defaults::kBnbAutoFallbackLp), "fallback to LP relaxation if BnB finds no incumbent within limits")
             ("bnb-max-nodes", po::value<int>(&this->bnbMaxNodes)->default_value(sypha_environment_defaults::kBnbMaxNodes), "set max number of BnB nodes to process")
@@ -181,6 +192,11 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         logger_->log(LOG_DEBUG, "Show solution: %s", this->showSolution ? "true" : "false");
         logger_->log(LOG_DEBUG, "Mehrotra max iterations: %d", this->mehrotraMaxIter);
         logger_->log(LOG_DEBUG, "Dense memory threshold: %g", this->denseGpuMemoryFractionThreshold);
+        logger_->log(LOG_DEBUG, "Linear solver strategy: %s", this->linearSolverStrategy.c_str());
+        logger_->log(LOG_DEBUG, "Krylov max CG iterations: %d", this->krylovMaxCgIter);
+        logger_->log(LOG_DEBUG, "Krylov CG tol initial: %g", this->krylovCgTolInitial);
+        logger_->log(LOG_DEBUG, "Krylov CG tol final: %g", this->krylovCgTolFinal);
+        logger_->log(LOG_DEBUG, "Krylov CG tol decay: %g", this->krylovCgTolDecayRate);
         logger_->log(LOG_DEBUG, "BnB max nodes: %d", this->bnbMaxNodes);
         logger_->log(LOG_DEBUG, "BnB device queue capacity: %d", this->bnbDeviceQueueCapacity);
         logger_->log(LOG_DEBUG, "BnB gap stall iterations: %d", this->bnbGapStallBranchIters);

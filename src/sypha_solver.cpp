@@ -3,10 +3,12 @@
 #include "sypha_solver_bnb.h"
 #include "sypha_solver_heuristics.h"
 #include "sypha_solver_dense.h"
+#include "sypha_solver_krylov.h"
 #include "sypha_node_sparse.h"
 
 #include "sypha_cuda_helper.h"
 #include <cstdint>
+#include <string>
 
 void initializeDenseLinearSolveWorkspace(DenseLinearSolveWorkspace *workspace,
                                          int nRows,
@@ -292,6 +294,12 @@ void releaseIpmWorkspace(IpmWorkspace *ws)
     if (ws->d_alphaResult) { checkCudaErrors(cudaFree(ws->d_alphaResult)); ws->d_alphaResult = NULL; }
     if (ws->d_buffer) { checkCudaErrors(cudaFree(ws->d_buffer)); ws->d_buffer = NULL; }
     if (ws->A_descr) { checkCudaErrors(cusparseDestroyMatDescr(ws->A_descr)); ws->A_descr = NULL; }
+    if (ws->krylov)
+    {
+        releaseKrylovWorkspace(ws->krylov);
+        delete ws->krylov;
+        ws->krylov = NULL;
+    }
     ws->isAllocated = false;
     ws->kktNnzCapacity = 0;
     ws->kktNrowsCapacity = 0;
@@ -340,6 +348,10 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
     cusparseMatDescr_t A_descr = NULL;
     DenseLinearSolveWorkspace denseLinearWorkspace;
     const bool useWs = (workspace != NULL) && workspace->isAllocated;
+
+    enum LinearSolvePath { PATH_DENSE_LU, PATH_SPARSE_QR, PATH_KRYLOV_CG };
+    LinearSolvePath linearSolvePath = PATH_SPARSE_QR;
+    KrylovSolveWorkspace *krylovWs = NULL;
 
 
     ///////////////////             GET STARTING POINT
@@ -561,6 +573,43 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         }
     }
 
+    // Determine linear solve path (dense LU, Krylov CG, or sparse QR)
+    const std::string &lsStrategy = node.env->linearSolverStrategy;
+    if (useDenseLinearSolve)
+    {
+        linearSolvePath = PATH_DENSE_LU;
+    }
+    else if (lsStrategy == "krylov" ||
+             (lsStrategy == "auto" && node.nrows < node.ncols))
+    {
+        linearSolvePath = PATH_KRYLOV_CG;
+        if (useWs)
+        {
+            if (!workspace->krylov)
+                workspace->krylov = new KrylovSolveWorkspace();
+            krylovWs = workspace->krylov;
+        }
+        else
+        {
+            krylovWs = new KrylovSolveWorkspace();
+        }
+        krylovWs->maxCgIter = node.env->krylovMaxCgIter;
+        krylovWs->cgTolInitial = node.env->krylovCgTolInitial;
+        krylovWs->cgTolFinal = node.env->krylovCgTolFinal;
+        krylovWs->cgTolDecayRate = node.env->krylovCgTolDecayRate;
+        initializeKrylovWorkspace(krylovWs, node.nrows, node.ncols);
+        if (shouldLogDenseSelection && node.env->getLogger())
+        {
+            node.env->getLogger()->log(LOG_INFO,
+                    "Using Krylov CG solver on normal equations (%d x %d, m < n)",
+                    node.nrows, node.ncols);
+        }
+    }
+    else
+    {
+        linearSolvePath = PATH_SPARSE_QR;
+    }
+
     auto sampleGpuMemory = [&]() {
         if (!canTrackGpuMem)
         {
@@ -753,10 +802,11 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         // Dense LU path: factorize once, then reuse for both affine and corrector solves.
         // Uses incremental KKT update: restore template + patch S/X diagonals (avoids
         // full sparse-to-dense conversion every iteration).
+        // Krylov CG path: solve normal equations A D^2 A^T dy = f with Jacobi-preconditioned CG.
         // Sparse QR fallback: cusolverSpDcsrlsvqr does not expose separate factor/solve,
         // so we call the monolithic solver for each RHS (only used when GPU memory is
         // insufficient for the dense n*n buffer).
-        if (useDenseLinearSolve)
+        if (linearSolvePath == PATH_DENSE_LU)
         {
             sampleGpuMemory();
             const bool factorOk = denseLinearWorkspace.templateReady
@@ -780,6 +830,44 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
                 terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
                 break;
             }
+        }
+        else if (linearSolvePath == PATH_KRYLOV_CG)
+        {
+            sampleGpuMemory();
+            // D^2 and Jacobi preconditioner: computed once per IPM iteration
+            krylovComputeD2(krylovWs, d_x, d_s, node.ncols, node.cudaStream);
+            krylovComputeJacobiDiag(krylovWs,
+                                    node.dCsrMatOffs, node.dCsrMatInds, node.dCsrMatVals,
+                                    node.nrows, node.ncols, node.cudaStream);
+            // Build predictor RHS
+            krylovBuildNormalEquationsRHS(krylovWs, d_resC, d_resB, d_resXS,
+                                         d_x, d_s, node.nrows, node.ncols,
+                                         node.matDescr, node.cusparseHandle, node.cudaStream);
+            // Adaptive tolerance
+            double cgTol = fmax(krylovWs->cgTolFinal,
+                                krylovWs->cgTolInitial * pow(krylovWs->cgTolDecayRate, (double)iterations));
+            int cgIters = krylovSolveCG(krylovWs, d_deltaY, krylovWs->d_ne_rhs, cgTol,
+                                        node.nrows, node.ncols,
+                                        node.matDescr, node.cusparseHandle,
+                                        node.cublasHandle, node.cudaStream);
+            if (cgIters < 0)
+            {
+                infeasibleOrNumerical = true;
+                terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
+                if (node.env->getLogger())
+                    node.env->getLogger()->log(LOG_DEBUG,
+                            "Krylov CG predictor failed at IPM iteration %d", iterations);
+                break;
+            }
+            if (node.env->getLogger())
+                node.env->getLogger()->log(LOG_TRACE,
+                        "Krylov CG predictor: %d CG iterations (tol=%.2e)", cgIters, cgTol);
+            // Back-substitution: recover dx, ds
+            krylovRecoverDxDs(krylovWs, d_deltaX, d_deltaS, d_deltaY,
+                              d_resC, d_resXS, d_x, d_s,
+                              node.nrows, node.ncols,
+                              node.matDescr, node.cusparseHandle, node.cudaStream);
+            sampleGpuMemory();
         }
         else
         {
@@ -836,8 +924,8 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
                                     &alpha, d_bufferX, 1, d_resXS, 1));
 
         // Corrector step: dense LU reuses factors (triangular solve only);
-        // sparse QR fallback does another full factorization.
-        if (useDenseLinearSolve)
+        // Krylov CG reuses D^2 and preconditioner; sparse QR does another full factorization.
+        if (linearSolvePath == PATH_DENSE_LU)
         {
             sampleGpuMemory();
             if (!solveDenseLinearSystemFactored(&denseLinearWorkspace, d_rhs, d_sol,
@@ -847,6 +935,36 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
                 terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
                 break;
             }
+        }
+        else if (linearSolvePath == PATH_KRYLOV_CG)
+        {
+            sampleGpuMemory();
+            // D^2 and Jacobi preconditioner are unchanged — only rebuild RHS
+            krylovBuildNormalEquationsRHS(krylovWs, d_resC, d_resB, d_resXS,
+                                         d_x, d_s, node.nrows, node.ncols,
+                                         node.matDescr, node.cusparseHandle, node.cudaStream);
+            double cgTol = fmax(krylovWs->cgTolFinal,
+                                krylovWs->cgTolInitial * pow(krylovWs->cgTolDecayRate, (double)iterations));
+            int cgIters = krylovSolveCG(krylovWs, d_deltaY, krylovWs->d_ne_rhs, cgTol,
+                                        node.nrows, node.ncols,
+                                        node.matDescr, node.cusparseHandle,
+                                        node.cublasHandle, node.cudaStream);
+            if (cgIters < 0)
+            {
+                infeasibleOrNumerical = true;
+                terminationReason = SOLVER_TERM_INFEASIBLE_OR_NUMERICAL;
+                if (node.env->getLogger())
+                    node.env->getLogger()->log(LOG_DEBUG,
+                            "Krylov CG corrector failed at IPM iteration %d", iterations);
+                break;
+            }
+            if (node.env->getLogger())
+                node.env->getLogger()->log(LOG_TRACE,
+                        "Krylov CG corrector: %d CG iterations (tol=%.2e)", cgIters, cgTol);
+            krylovRecoverDxDs(krylovWs, d_deltaX, d_deltaS, d_deltaY,
+                              d_resC, d_resXS, d_x, d_s,
+                              node.nrows, node.ncols,
+                              node.matDescr, node.cusparseHandle, node.cudaStream);
         }
         else
         {
@@ -905,10 +1023,13 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
             break;
         }
 
-        // update x and s on matrix
-        off = node.nnz * 2 + node.ncols;
-        checkCudaErrors(cublasDcopy(node.cublasHandle, node.ncols, d_s, 1, &d_csrAVals[off], 2));
-        checkCudaErrors(cublasDcopy(node.cublasHandle, node.ncols, d_x, 1, &d_csrAVals[off + 1], 2));
+        // update x and s on KKT matrix (not needed for Krylov path)
+        if (linearSolvePath != PATH_KRYLOV_CG)
+        {
+            off = node.nnz * 2 + node.ncols;
+            checkCudaErrors(cublasDcopy(node.cublasHandle, node.ncols, d_s, 1, &d_csrAVals[off], 2));
+            checkCudaErrors(cublasDcopy(node.cublasHandle, node.ncols, d_x, 1, &d_csrAVals[off + 1], 2));
+        }
 
         // Update primal-dual gap monitor
         double currPrimalObj = 0.0;
@@ -986,7 +1107,7 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
         const double extraPeakMb = (double)(gpuMemFreeAfterKktSetup >= gpuMemMinDuringLinearSolve ? (gpuMemFreeAfterKktSetup - gpuMemMinDuringLinearSolve) : 0) / toMb;
         node.env->getLogger()->log(LOG_DEBUG,
                 "GPU memory (%s): free before=%.2f MB, after setup=%.2f MB, min during=%.2f MB, setup=%.2f MB, peak=%.2f MB, samples=%d",
-                useDenseLinearSolve ? "dense" : "sparse",
+                (linearSolvePath == PATH_DENSE_LU) ? "dense" : (linearSolvePath == PATH_KRYLOV_CG) ? "krylov" : "sparse",
                 freeBeforeMb, freeAfterSetupMb, minDuringSolveMb, setupUsedMb, extraPeakMb, gpuMemSampleCount);
     }
 
@@ -1047,6 +1168,13 @@ SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecut
     if (denseLinearWorkspace.isEnabled)
     {
         releaseDenseLinearSolveWorkspace(&denseLinearWorkspace);
+    }
+
+    if (!useWs && krylovWs)
+    {
+        releaseKrylovWorkspace(krylovWs);
+        delete krylovWs;
+        krylovWs = NULL;
     }
 
     return infeasibleOrNumerical ? CODE_GENERIC_ERROR : CODE_SUCCESFULL;

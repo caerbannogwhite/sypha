@@ -273,6 +273,11 @@ public:
         env.preprocessTimeLimitSeconds = params_.preprocess_time_limit_sec;
         env.bnbDisable = params_.disable_bnb;
         env.showSolution = params_.show_solution;
+        env.linearSolverStrategy = params_.linear_solver_strategy;
+        env.krylovMaxCgIter = params_.krylov_max_cg_iter;
+        env.krylovCgTolInitial = params_.krylov_cg_tol_initial;
+        env.krylovCgTolFinal = params_.krylov_cg_tol_final;
+        env.krylovCgTolDecayRate = params_.krylov_cg_tol_decay_rate;
         env.modelType = MODEL_TYPE_SCP;
         env.inputFilePath = "";
         env.internalStatus = CODE_SUCCESFULL;

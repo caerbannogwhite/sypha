@@ -10,6 +10,8 @@
 #include "cusolverDn.h"
 #include "cublas_v2.h"
 
+struct KrylovSolveWorkspace;
+
 struct DenseLinearSolveWorkspace
 {
     bool isEnabled = false;
@@ -96,6 +98,8 @@ struct IpmWorkspace
     size_t bufferCapacity = 0;
 
     cusparseMatDescr_t A_descr = NULL;
+
+    KrylovSolveWorkspace *krylov = NULL;
 
     bool isAllocated = false;
 };

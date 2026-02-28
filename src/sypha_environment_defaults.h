@@ -18,6 +18,17 @@ constexpr double kMehrotraCholTol = 1e-8;
 constexpr int kMehrotraReorder = 1;
 constexpr double kDenseGpuMemoryFractionThreshold = 2.0 / 3.0;
 
+constexpr int kKrylovMaxCgIter = 500;
+constexpr double kKrylovCgTolInitial = 1e-2;
+constexpr double kKrylovCgTolFinal = 1e-8;
+constexpr double kKrylovCgTolDecayRate = 0.5;
+
+inline const std::string &kLinearSolverStrategy()
+{
+    static const std::string value = "auto";
+    return value;
+}
+
 constexpr int kBnbMaxNodes = 100000;
 constexpr int kBnbDeviceQueueCapacity = 1000;
 constexpr int kBnbGapStallBranchIters = 5;

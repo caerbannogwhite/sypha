@@ -32,6 +32,13 @@ struct SolverParameters {
     double preprocess_time_limit_sec = 5.0;
     bool disable_bnb = false;
     bool show_solution = false;
+
+    // Linear solver strategy: "auto", "dense", "sparse_qr", "krylov"
+    std::string linear_solver_strategy = "auto";
+    int krylov_max_cg_iter = 500;
+    double krylov_cg_tol_initial = 1e-2;
+    double krylov_cg_tol_final = 1e-8;
+    double krylov_cg_tol_decay_rate = 0.5;
 };
 
 class Solver;
