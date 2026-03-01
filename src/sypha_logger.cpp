@@ -1,14 +1,14 @@
 #include "sypha_logger.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
-#include <sys/time.h>
 
 double SyphaLogger::timerMs()
 {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return tv.tv_sec * 1000.0 + tv.tv_usec / 1000.0;
+    using namespace std::chrono;
+    auto now = steady_clock::now();
+    return duration<double, std::milli>(now.time_since_epoch()).count();
 }
 
 SyphaLogger::SyphaLogger(double originMs, SyphaLogLevel verbosity)
@@ -33,7 +33,7 @@ SyphaLogger::~SyphaLogger()
 
 void SyphaLogger::log(SyphaLogLevel level, const char *fmt, ...)
 {
-    if ((int)level > (int)verbosity_)
+    if (static_cast<int>(level) > static_cast<int>(verbosity_))
     {
         return;
     }

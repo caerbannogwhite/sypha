@@ -30,7 +30,7 @@ public:
 
 private:
     int cap = 1;
-    DeviceQueueEntry *dEntries = NULL;
+    DeviceQueueEntry *dEntries = nullptr;
     std::vector<DeviceQueueEntry> hostWindow;
     size_t cursor = 0;
 };

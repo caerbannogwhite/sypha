@@ -4,6 +4,7 @@
 #include <cuda_runtime.h>
 
 #include "cusparse.h"
+#include "cusolverDn.h"
 #include "cusolverSp.h"
 
 #include "common.h"
@@ -11,10 +12,6 @@
 #include "sypha_cuda_helper.h"
 
 class SyphaEnvironment;
-struct SolverExecutionConfig;
-struct SolverExecutionResult;
-struct IpmWorkspace;
-namespace sypha { class SolverImpl; }
 
 class SyphaCOOEntry
 {
@@ -28,7 +25,8 @@ public:
 
 class SyphaNodeSparse
 {
-private:
+public:
+    // Model dimensions
     int ncols;
     int nrows;
     int ncolsOriginal;      // Active original columns (before adding branch slacks)
@@ -38,18 +36,19 @@ private:
     double objvalDual;
     double mipGap;
 
-    vector<SyphaCOOEntry> *hCooMat;
+    // Host-side model data
+    std::vector<SyphaCOOEntry> hCooMat;
+    std::vector<int> hCsrMatInds;
+    std::vector<int> hCsrMatOffs;
+    std::vector<double> hCsrMatVals;
+    std::vector<int> hActiveToInputCols; // active original col index -> input original col index
+    std::vector<double> hObjDns;
+    std::vector<double> hRhsDns;
+    std::vector<double> hX;
+    std::vector<double> hY;
+    std::vector<double> hS;
 
-    vector<int> *hCsrMatInds;
-    vector<int> *hCsrMatOffs;
-    vector<double> *hCsrMatVals;
-    vector<int> *hActiveToInputCols; // active original col index -> input original col index
-    double *hObjDns;
-    double *hRhsDns;
-    double *hX;
-    double *hY;
-    double *hS;
-
+    // Device-side model data
     int *dCsrMatInds;
     int *dCsrMatOffs;
     double *dCsrMatVals;
@@ -62,6 +61,7 @@ private:
     double *dY;
     double *dS;
 
+    // Solver statistics
     int iterations;
     double timeStartSolEnd;
     double timeStartSolStart;
@@ -70,41 +70,33 @@ private:
     double timeSolverEnd;
     double timeSolverStart;
 
+    // cuSPARSE descriptors
     cusparseSpMatDescr_t matDescr;
     cusparseSpMatDescr_t matTransDescr;
     cusparseDnVecDescr_t objDescr;
     cusparseDnVecDescr_t rhsDescr;
 
+    // Environment and CUDA handles
     SyphaEnvironment *env;
-
     cudaStream_t cudaStream;
     cublasHandle_t cublasHandle;
     cusparseHandle_t cusparseHandle;
     cusolverDnHandle_t cusolverDnHandle;
     cusolverSpHandle_t cusolverSpHandle;
 
-    SyphaStatus releaseModelOnDevice();
-    void initActiveColTracking();
-    void rebuildCsrAfterRemoval(
-        const std::vector<int> &oldToNew,
-        const std::vector<int> &newToOld,
-        const std::vector<int> &newActiveToInput,
-        const double *oldCosts);
-
-public:
     SyphaNodeSparse(SyphaEnvironment &env);
     ~SyphaNodeSparse();
 
-    int getNumCols();
-    int getNumRows();
-    int getNumNonZero();
-    int getIterations();
-    double getObjvalPrim();
-    double getObjvalDual();
-    double getMipGap();
-    double getTimeStartSol();
-    double getTimePreSol();
-    double getTimeSolver();
+    int getNumCols() const;
+    int getNumRows() const;
+    int getNumNonZero() const;
+    int getIterations() const;
+    double getObjvalPrim() const;
+    double getObjvalDual() const;
+    double getMipGap() const;
+    double getTimeStartSol() const;
+    double getTimePreSol() const;
+    double getTimeSolver() const;
     SyphaStatus solve();
     SyphaStatus readModel();
     SyphaStatus preprocessModel(double incumbentUpperBound = std::numeric_limits<double>::infinity());
@@ -114,18 +106,15 @@ public:
     SyphaStatus copyModelOnDevice();
     SyphaStatus setInitValues();
     SyphaStatus setUpCuda();
+    SyphaStatus releaseModelOnDevice();
 
-    friend SyphaStatus model_reader_read_scp_file_sparse_coo(SyphaNodeSparse &node, string inputFilePath);
-    friend SyphaStatus model_reader_read_scp_file_sparse_csr(SyphaNodeSparse &node, string inputFilePath);
-    friend SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecutionConfig &config, SolverExecutionResult *result, IpmWorkspace *workspace);
-    friend SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_mehrotra_init_1(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node);
-
-    friend class sypha::SolverImpl;
+private:
+    void initActiveColTracking();
+    void rebuildCsrAfterRemoval(
+        const std::vector<int> &oldToNew,
+        const std::vector<int> &newToOld,
+        const std::vector<int> &newActiveToInput,
+        const double *oldCosts);
 };
 
 #endif // SYPHA_NODE_SPARSE_H

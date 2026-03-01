@@ -13,23 +13,23 @@ struct KrylovSolveWorkspace
     int capacityN = 0;
 
     // CG vectors (size m on device)
-    double *d_r = NULL;
-    double *d_z = NULL;
-    double *d_p = NULL;
-    double *d_Ap = NULL;
+    double *d_r = nullptr;
+    double *d_z = nullptr;
+    double *d_p = nullptr;
+    double *d_Ap = nullptr;
 
     // Intermediate (size n on device) for two-step SpMV: A^T*p then D^2.*q then A*q
-    double *d_tmp_n = NULL;
+    double *d_tmp_n = nullptr;
 
     // Normal-equations RHS (size m)
-    double *d_ne_rhs = NULL;
+    double *d_ne_rhs = nullptr;
 
     // D^2 = x/s (size n) and Jacobi diagonal (size m)
-    double *d_D2 = NULL;
-    double *d_precond_diag = NULL;
+    double *d_D2 = nullptr;
+    double *d_precond_diag = nullptr;
 
     // cuSPARSE SpMV buffer
-    void *d_spmvBuffer = NULL;
+    void *d_spmvBuffer = nullptr;
     size_t spmvBufferCapacity = 0;
 
     // CG tolerance parameters (adaptive)

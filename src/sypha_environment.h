@@ -5,23 +5,16 @@
 
 #include "common.h"
 #include "sypha_logger.h"
-#include "sypha_solver_dense.h"
-#include "sypha_solver_sparse.h"
-#include "sypha_node_dense.h"
-#include "sypha_node_sparse.h"
 
-class SyphaNodeDense;
-class SyphaNodeSparse;
-struct IpmWorkspace;
 namespace sypha { class SolverImpl; }
 
 class SyphaEnvironment
 {
 private:
     SyphaStatus internalStatus;
-    string test;
+    std::string test;
     int testRepeat;
-    string inputFilePath;
+    std::string inputFilePath;
     ModelInputType modelType;
     bool sparse;
 
@@ -57,49 +50,72 @@ private:
     int bnbGapStallBranchIters;
     double bnbGapStallMinImprovPct;
     double bnbIntegralityTol;
-    string bnbVarSelectionStrategy;
+    std::string bnbVarSelectionStrategy;
     int bnbHeuristicEveryNNodes;
-    string bnbIntHeuristics;
+    std::string bnbIntHeuristics;
     double bnbLogIntervalSeconds;
     double bnbHardTimeLimitSeconds;
     int bnbGapStagnationWindow;
     bool bnbDisable;
     bool bnbAutoFallbackLp;
     bool showSolution;
-    string preprocessColumnStrategies;
+    std::string preprocessColumnStrategies;
     double preprocessTimeLimitSeconds;
 
-    SyphaLogger *logger_ = nullptr;
+    std::unique_ptr<SyphaLogger> logger_;
 
 public:
     SyphaEnvironment();
     SyphaEnvironment(int argc, char *argv[]);
     ~SyphaEnvironment();
 
-    int getVerbosityLevel();
-    std::string getTest();
-    SyphaStatus getStatus();
-    bool getShowSolution();
-    SyphaLogger *getLogger();
+    // Existing getters (now const)
+    int getVerbosityLevel() const;
+    std::string getTest() const;
+    SyphaStatus getStatus() const;
+    bool getShowSolution() const;
+    SyphaLogger *getLogger() const;
+    double timer() const;
 
-    double timer();
+    // Config parameter getters
+    ModelInputType getModelType() const;
+    const std::string &getInputFilePath() const;
+    double getPxInfinity() const;
+    double getPxTolerance() const;
+
+    int getMehrotraMaxIter() const;
+    double getMehrotraEta() const;
+    double getMehrotraMuTol() const;
+    double getMehrotraCholTol() const;
+    int getMehrotraReorder() const;
+    double getDenseGpuMemoryFractionThreshold() const;
+
+    const std::string &getLinearSolverStrategy() const;
+    int getKrylovMaxCgIter() const;
+    double getKrylovCgTolInitial() const;
+    double getKrylovCgTolFinal() const;
+    double getKrylovCgTolDecayRate() const;
+
+    int getBnbMaxNodes() const;
+    int getBnbDeviceQueueCapacity() const;
+    int getBnbGapStallBranchIters() const;
+    double getBnbGapStallMinImprovPct() const;
+    double getBnbIntegralityTol() const;
+    const std::string &getBnbVarSelectionStrategy() const;
+    int getBnbHeuristicEveryNNodes() const;
+    const std::string &getBnbIntHeuristics() const;
+    double getBnbLogIntervalSeconds() const;
+    double getBnbHardTimeLimitSeconds() const;
+    int getBnbGapStagnationWindow() const;
+    bool getBnbDisable() const;
+    bool getBnbAutoFallbackLp() const;
+
+    const std::string &getPreprocessColumnStrategies() const;
+    double getPreprocessTimeLimitSeconds() const;
 
     SyphaStatus setDefaultParameters();
     SyphaStatus setUpDevice();
     SyphaStatus readInputArguments(int argc, char *argv[]);
-
-    friend class SyphaNodeDense;
-    friend class SyphaNodeSparse;
-
-    friend SyphaStatus solver_dense_mehrotra(SyphaNodeDense &node);
-    friend SyphaStatus solver_dense_mehrotra_init(SyphaNodeDense &node);
-    friend SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecutionConfig &config, SolverExecutionResult *result, IpmWorkspace *workspace);
-    friend SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_mehrotra_init_1(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node);
-    friend SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node);
 
     friend class sypha::SolverImpl;
 };

@@ -47,7 +47,12 @@ struct SolverExecutionResult
     std::vector<double> dualSolution;
 };
 
+SyphaStatus solver_sparse_mehrotra(SyphaNodeSparse &node);
 SyphaStatus solver_sparse_mehrotra_run(SyphaNodeSparse &node, const SolverExecutionConfig &config, SolverExecutionResult *result, IpmWorkspace *workspace = nullptr);
+SyphaStatus solver_sparse_mehrotra_2(SyphaNodeSparse &node);
+SyphaStatus solver_sparse_mehrotra_init_1(SyphaNodeSparse &node);
+SyphaStatus solver_sparse_mehrotra_init_2(SyphaNodeSparse &node);
+SyphaStatus solver_sparse_mehrotra_init_gsl(SyphaNodeSparse &node);
 SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node);
 
 #endif // SYPHA_SOLVER_SPARSE_H

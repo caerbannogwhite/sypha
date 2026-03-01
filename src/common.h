@@ -1,13 +1,10 @@
 #ifndef COMMON_H
 #define COMMON_H
 
-#include <boost/program_options.hpp>
 #include <algorithm>
 #include <iostream>
-#include <math.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <time.h>
+#include <cstdlib>
+#include <cstdio>
 #include <string>
 #include <vector>
 #include <deque>
@@ -15,8 +12,8 @@
 #include <memory>
 #include <limits>
 #include <cmath>
-#include <sys/time.h>
 #include <ctime>
+#include <chrono>
 
 #include "sypha_cuda_helper.h"
 #include <cuda_runtime.h>
@@ -24,12 +21,9 @@
 #include <cusparse.h>
 #include <cusolverSp.h>
 
-using namespace std;
-namespace po = boost::program_options;
-
 enum SyphaStatus
 {
-    CODE_SUCCESFULL,
+    CODE_SUCCESSFUL,
     CODE_GENERIC_ERROR,
     CODE_MODEL_TYPE_NOT_FOUND,
 };

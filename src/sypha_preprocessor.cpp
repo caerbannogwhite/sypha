@@ -23,17 +23,17 @@ GreedySetCoverResult greedy_set_cover_heuristic(
     }
 
     // Build rowsByColumn (transpose CSR row→col).
-    std::vector<std::vector<int>> rowsByColumn((size_t)ncolsOriginal);
+    std::vector<std::vector<int>> rowsByColumn(static_cast<size_t>(ncolsOriginal));
     for (int i = 0; i < nrows; ++i)
     {
-        const int begin = csrOffs[(size_t)i];
-        const int end = csrOffs[(size_t)i + 1];
+        const int begin = csrOffs[static_cast<size_t>(i)];
+        const int end = csrOffs[static_cast<size_t>(i) + 1];
         for (int k = begin; k < end; ++k)
         {
-            const int col = csrInds[(size_t)k];
-            if (col >= 0 && col < ncolsOriginal && csrVals[(size_t)k] > 0.0)
+            const int col = csrInds[static_cast<size_t>(k)];
+            if (col >= 0 && col < ncolsOriginal && csrVals[static_cast<size_t>(k)] > 0.0)
             {
-                rowsByColumn[(size_t)col].push_back(i);
+                rowsByColumn[static_cast<size_t>(col)].push_back(i);
             }
         }
     }
@@ -45,10 +45,10 @@ GreedySetCoverResult greedy_set_cover_heuristic(
         int negCoverage;
         int colIndex;
     };
-    std::vector<ColEntry> columns((size_t)ncolsOriginal);
+    std::vector<ColEntry> columns(static_cast<size_t>(ncolsOriginal));
     for (int j = 0; j < ncolsOriginal; ++j)
     {
-        columns[(size_t)j] = {objDns[j], -(int)rowsByColumn[(size_t)j].size(), j};
+        columns[static_cast<size_t>(j)] = {objDns[j], -static_cast<int>(rowsByColumn[static_cast<size_t>(j)].size()), j};
     }
     std::sort(columns.begin(), columns.end(), [](const ColEntry &a, const ColEntry &b) {
         if (a.cost != b.cost)
@@ -57,7 +57,7 @@ GreedySetCoverResult greedy_set_cover_heuristic(
     });
 
     // Greedy scan: include a column if it covers at least one uncovered row.
-    std::vector<char> covered((size_t)nrows, 0);
+    std::vector<char> covered(static_cast<size_t>(nrows), 0);
     int uncoveredCount = nrows;
     double totalCost = 0.0;
 
@@ -67,19 +67,19 @@ GreedySetCoverResult greedy_set_cover_heuristic(
             break;
 
         int newCoverage = 0;
-        for (int row : rowsByColumn[(size_t)entry.colIndex])
+        for (int row : rowsByColumn[static_cast<size_t>(entry.colIndex)])
         {
-            if (!covered[(size_t)row])
+            if (!covered[static_cast<size_t>(row)])
                 ++newCoverage;
         }
 
         if (newCoverage > 0)
         {
-            for (int row : rowsByColumn[(size_t)entry.colIndex])
+            for (int row : rowsByColumn[static_cast<size_t>(entry.colIndex)])
             {
-                if (!covered[(size_t)row])
+                if (!covered[static_cast<size_t>(row)])
                 {
-                    covered[(size_t)row] = 1;
+                    covered[static_cast<size_t>(row)] = 1;
                     --uncoveredCount;
                 }
             }
@@ -186,7 +186,7 @@ std::string toLowerCopy(const std::string &s)
     std::string out = s;
     std::transform(out.begin(), out.end(), out.begin(),
                    [](unsigned char c)
-                   { return (char)std::tolower(c); });
+                   { return static_cast<char>(std::tolower(c)); });
     return out;
 }
 
@@ -229,34 +229,34 @@ public:
         {
             if (std::chrono::steady_clock::now() >= ctx.deadline)
                 break;
-            if (!ctx.active[(size_t)target])
+            if (!ctx.active[static_cast<size_t>(target)])
             {
                 continue;
             }
-            const std::vector<int> &targetRows = ctx.rowsByColumn[(size_t)target];
+            const std::vector<int> &targetRows = ctx.rowsByColumn[static_cast<size_t>(target)];
             for (int cand = 0; cand < ctx.ncols; ++cand)
             {
-                if (cand == target || !ctx.active[(size_t)cand])
+                if (cand == target || !ctx.active[static_cast<size_t>(cand)])
                 {
                     continue;
                 }
-                if (ctx.costs[(size_t)cand] > ctx.costs[(size_t)target] + tol)
+                if (ctx.costs[static_cast<size_t>(cand)] > ctx.costs[static_cast<size_t>(target)] + tol)
                 {
                     continue;
                 }
 
-                const std::vector<int> &candRows = ctx.rowsByColumn[(size_t)cand];
+                const std::vector<int> &candRows = ctx.rowsByColumn[static_cast<size_t>(cand)];
                 if (!isSubsetSorted(targetRows, candRows))
                 {
                     continue;
                 }
 
-                if (fabs(ctx.costs[(size_t)cand] - ctx.costs[(size_t)target]) <= tol && cand > target)
+                if (fabs(ctx.costs[static_cast<size_t>(cand)] - ctx.costs[static_cast<size_t>(target)]) <= tol && cand > target)
                 {
                     continue;
                 }
 
-                ctx.active[(size_t)target] = 0;
+                ctx.active[static_cast<size_t>(target)] = 0;
                 ++removed;
                 break;
             }
@@ -281,13 +281,13 @@ public:
         {
             if (std::chrono::steady_clock::now() >= ctx.deadline)
                 break;
-            if (!ctx.active[(size_t)target])
+            if (!ctx.active[static_cast<size_t>(target)])
             {
                 continue;
             }
 
-            const std::vector<int> &targetRows = ctx.rowsByColumn[(size_t)target];
-            const double targetCost = ctx.costs[(size_t)target];
+            const std::vector<int> &targetRows = ctx.rowsByColumn[static_cast<size_t>(target)];
+            const double targetCost = ctx.costs[static_cast<size_t>(target)];
             bool dominated = false;
 
             for (int a = 0; a < ctx.ncols && !dominated; ++a)
@@ -297,11 +297,11 @@ public:
                     timedOut = true;
                     break;
                 }
-                if (a == target || !ctx.active[(size_t)a])
+                if (a == target || !ctx.active[static_cast<size_t>(a)])
                 {
                     continue;
                 }
-                const double aCost = ctx.costs[(size_t)a];
+                const double aCost = ctx.costs[static_cast<size_t>(a)];
                 if (aCost >= targetCost - tol)
                 {
                     continue;
@@ -309,16 +309,16 @@ public:
 
                 for (int b = a + 1; b < ctx.ncols; ++b)
                 {
-                    if (b == target || !ctx.active[(size_t)b])
+                    if (b == target || !ctx.active[static_cast<size_t>(b)])
                     {
                         continue;
                     }
-                    const double pairCost = aCost + ctx.costs[(size_t)b];
+                    const double pairCost = aCost + ctx.costs[static_cast<size_t>(b)];
                     if (pairCost >= targetCost - tol)
                     {
                         continue;
                     }
-                    if (unionCoversSorted(targetRows, ctx.rowsByColumn[(size_t)a], ctx.rowsByColumn[(size_t)b]))
+                    if (unionCoversSorted(targetRows, ctx.rowsByColumn[static_cast<size_t>(a)], ctx.rowsByColumn[static_cast<size_t>(b)]))
                     {
                         dominated = true;
                         break;
@@ -328,7 +328,7 @@ public:
 
             if (dominated)
             {
-                ctx.active[(size_t)target] = 0;
+                ctx.active[static_cast<size_t>(target)] = 0;
                 ++removed;
             }
         }
@@ -349,62 +349,62 @@ public:
             return 0;
 
         // Build columnsByRow for efficient candidate lookup.
-        std::vector<std::vector<int>> columnsByRow((size_t)ctx.nrows);
+        std::vector<std::vector<int>> columnsByRow(static_cast<size_t>(ctx.nrows));
         for (int j = 0; j < ctx.ncols; ++j)
         {
-            if (!ctx.active[(size_t)j])
+            if (!ctx.active[static_cast<size_t>(j)])
                 continue;
-            for (int row : ctx.rowsByColumn[(size_t)j])
-                columnsByRow[(size_t)row].push_back(j);
+            for (int row : ctx.rowsByColumn[static_cast<size_t>(j)])
+                columnsByRow[static_cast<size_t>(row)].push_back(j);
         }
 
         // Sort columns by cost descending (most expensive first).
         std::vector<int> sortedCols;
-        sortedCols.reserve((size_t)ctx.ncols);
+        sortedCols.reserve(static_cast<size_t>(ctx.ncols));
         for (int j = 0; j < ctx.ncols; ++j)
         {
-            if (ctx.active[(size_t)j])
+            if (ctx.active[static_cast<size_t>(j)])
                 sortedCols.push_back(j);
         }
         std::sort(sortedCols.begin(), sortedCols.end(),
-                  [&](int a, int b) { return ctx.costs[(size_t)a] > ctx.costs[(size_t)b]; });
+                  [&](int a, int b) { return ctx.costs[static_cast<size_t>(a)] > ctx.costs[static_cast<size_t>(b)]; });
 
         int removed = 0;
-        std::vector<char> seen((size_t)ctx.ncols, 0);
+        std::vector<char> seen(static_cast<size_t>(ctx.ncols), 0);
         bool timedOut = false;
 
         for (int target : sortedCols)
         {
             if (std::chrono::steady_clock::now() >= ctx.deadline)
                 break;
-            if (!ctx.active[(size_t)target])
+            if (!ctx.active[static_cast<size_t>(target)])
                 continue;
 
-            const std::vector<int> &targetRows = ctx.rowsByColumn[(size_t)target];
+            const std::vector<int> &targetRows = ctx.rowsByColumn[static_cast<size_t>(target)];
             if (targetRows.empty())
                 continue;
-            const double targetCost = ctx.costs[(size_t)target];
+            const double targetCost = ctx.costs[static_cast<size_t>(target)];
 
             // Collect candidate columns that share at least one row with target.
             std::vector<int> candidates;
             for (int row : targetRows)
             {
-                for (int col : columnsByRow[(size_t)row])
+                for (int col : columnsByRow[static_cast<size_t>(row)])
                 {
-                    if (col != target && ctx.active[(size_t)col] && !seen[(size_t)col])
+                    if (col != target && ctx.active[static_cast<size_t>(col)] && !seen[static_cast<size_t>(col)])
                     {
-                        seen[(size_t)col] = 1;
+                        seen[static_cast<size_t>(col)] = 1;
                         candidates.push_back(col);
                     }
                 }
             }
             // Reset seen for next target.
             for (int col : candidates)
-                seen[(size_t)col] = 0;
+                seen[static_cast<size_t>(col)] = 0;
 
             // Sort candidates by cost ascending for early termination.
             std::sort(candidates.begin(), candidates.end(),
-                      [&](int a, int b) { return ctx.costs[(size_t)a] < ctx.costs[(size_t)b]; });
+                      [&](int a, int b) { return ctx.costs[static_cast<size_t>(a)] < ctx.costs[static_cast<size_t>(b)]; });
 
             bool dominated = false;
 
@@ -417,17 +417,17 @@ public:
                     break;
                 }
                 const int a = candidates[i];
-                const double costA = ctx.costs[(size_t)a];
+                const double costA = ctx.costs[static_cast<size_t>(a)];
                 if (costA > targetCost + tol)
                     break;
                 for (size_t j = i + 1; j < candidates.size() && !dominated; ++j)
                 {
                     const int b = candidates[j];
-                    if (costA + ctx.costs[(size_t)b] > targetCost + tol)
+                    if (costA + ctx.costs[static_cast<size_t>(b)] > targetCost + tol)
                         break;
                     if (unionCoversSorted(targetRows,
-                                          ctx.rowsByColumn[(size_t)a],
-                                          ctx.rowsByColumn[(size_t)b]))
+                                          ctx.rowsByColumn[static_cast<size_t>(a)],
+                                          ctx.rowsByColumn[static_cast<size_t>(b)]))
                     {
                         dominated = true;
                     }
@@ -448,24 +448,24 @@ public:
                         break;
                     }
                     const int a = candidates[i];
-                    const double costA = ctx.costs[(size_t)a];
+                    const double costA = ctx.costs[static_cast<size_t>(a)];
                     if (costA > targetCost + tol)
                         break;
                     for (size_t j = i + 1; j < candidates.size() && !dominated; ++j)
                     {
                         const int b = candidates[j];
-                        const double costAB = costA + ctx.costs[(size_t)b];
+                        const double costAB = costA + ctx.costs[static_cast<size_t>(b)];
                         if (costAB > targetCost + tol)
                             break;
                         for (size_t k = j + 1; k < candidates.size() && !dominated; ++k)
                         {
                             const int c = candidates[k];
-                            if (costAB + ctx.costs[(size_t)c] > targetCost + tol)
+                            if (costAB + ctx.costs[static_cast<size_t>(c)] > targetCost + tol)
                                 break;
                             if (tripleUnionCoversSorted(targetRows,
-                                                        ctx.rowsByColumn[(size_t)a],
-                                                        ctx.rowsByColumn[(size_t)b],
-                                                        ctx.rowsByColumn[(size_t)c]))
+                                                        ctx.rowsByColumn[static_cast<size_t>(a)],
+                                                        ctx.rowsByColumn[static_cast<size_t>(b)],
+                                                        ctx.rowsByColumn[static_cast<size_t>(c)]))
                             {
                                 dominated = true;
                             }
@@ -479,7 +479,7 @@ public:
 
             if (dominated)
             {
-                ctx.active[(size_t)target] = 0;
+                ctx.active[static_cast<size_t>(target)] = 0;
                 ++removed;
             }
         }
@@ -495,8 +495,8 @@ std::vector<std::unique_ptr<IColumnPreprocessRule>> makeColumnPreprocessRules(co
     const std::vector<std::string> tokens = splitCsvTokens(configured);
     if (tokens.empty())
     {
-        rules.push_back(std::unique_ptr<IColumnPreprocessRule>(new SingleColumnDominanceRule()));
-        rules.push_back(std::unique_ptr<IColumnPreprocessRule>(new TwoColumnDominanceRule()));
+        rules.push_back(std::make_unique<SingleColumnDominanceRule>());
+        rules.push_back(std::make_unique<TwoColumnDominanceRule>());
         return rules;
     }
 
@@ -509,22 +509,22 @@ std::vector<std::unique_ptr<IColumnPreprocessRule>> makeColumnPreprocessRules(co
         }
         if (token == "single_column_dominance" || token == "single")
         {
-            rules.push_back(std::unique_ptr<IColumnPreprocessRule>(new SingleColumnDominanceRule()));
+            rules.push_back(std::make_unique<SingleColumnDominanceRule>());
         }
         else if (token == "two_column_dominance" || token == "pair" || token == "two")
         {
-            rules.push_back(std::unique_ptr<IColumnPreprocessRule>(new TwoColumnDominanceRule()));
+            rules.push_back(std::make_unique<TwoColumnDominanceRule>());
         }
         else if (token == "cost_driven_replacement" || token == "cost_driven")
         {
-            rules.push_back(std::unique_ptr<IColumnPreprocessRule>(new CostDrivenReplacementRule()));
+            rules.push_back(std::make_unique<CostDrivenReplacementRule>());
         }
     }
 
     if (rules.empty())
     {
-        rules.push_back(std::unique_ptr<IColumnPreprocessRule>(new SingleColumnDominanceRule()));
-        rules.push_back(std::unique_ptr<IColumnPreprocessRule>(new TwoColumnDominanceRule()));
+        rules.push_back(std::make_unique<SingleColumnDominanceRule>());
+        rules.push_back(std::make_unique<TwoColumnDominanceRule>());
     }
 
     return rules;

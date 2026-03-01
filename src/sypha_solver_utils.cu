@@ -1,4 +1,5 @@
 
+#include <cfloat>
 #include "sypha_solver_utils.h"
 
 __global__ void elem_min_mult_kernel(double *d_A, double *d_B, double *d_C, int N)
@@ -17,27 +18,19 @@ void elem_min_mult_dev(double *d_A, double *d_B, double *d_C, int N, cudaStream_
 
 void elem_min_mult_host(double *d_A, double *d_B, double *d_C, const int N)
 {
-    double *buffA;
-    double *buffB;
-    double *buffC;
+    std::vector<double> buffA(static_cast<size_t>(N));
+    std::vector<double> buffB(static_cast<size_t>(N));
+    std::vector<double> buffC(static_cast<size_t>(N));
 
-    buffA = (double *)malloc(sizeof(double) * N);
-    buffB = (double *)malloc(sizeof(double) * N);
-    buffC = (double *)malloc(sizeof(double) * N);
-
-    cudaMemcpy(buffA, d_A, sizeof(double) * N, cudaMemcpyDeviceToHost);
-    cudaMemcpy(buffB, d_B, sizeof(double) * N, cudaMemcpyDeviceToHost);
+    cudaMemcpy(buffA.data(), d_A, sizeof(double) * N, cudaMemcpyDeviceToHost);
+    cudaMemcpy(buffB.data(), d_B, sizeof(double) * N, cudaMemcpyDeviceToHost);
 
     for (int j = 0; j < N; ++j)
     {
         buffC[j] = -buffA[j] * buffB[j];
     }
 
-    cudaMemcpy(d_C, buffC, sizeof(double) * N, cudaMemcpyHostToDevice);
-
-    free(buffA);
-    free(buffB);
-    free(buffC);
+    cudaMemcpy(d_C, buffC.data(), sizeof(double) * N, cudaMemcpyHostToDevice);
 }
 
 void elem_min_mult_hybr(double *d_A, double *d_B, double *d_C, int N)
@@ -123,7 +116,7 @@ __global__ void finalMinimum_kernel(const double *blockResults, double *result, 
     unsigned int tid = threadIdx.x;
 
     double val = DBL_MAX;
-    if ((int)tid < nBlocks)
+    if (static_cast<int>(tid) < nBlocks)
     {
         val = blockResults[tid];
     }
@@ -164,8 +157,8 @@ void alpha_max_dev(const double *d_x, const double *d_deltaX, const double *d_s,
     alpha_max_ratios_kernel<<<nBlocks, blockSize, 0, stream>>>(d_x, d_deltaX, d_s, d_deltaS, d_tmp_prim, d_tmp_dual, N);
 
     // Step 2: per-block reduction
-    computeMinimum_kernel<<<nBlocks, blockSize, shmem, stream>>>(d_tmp_prim, d_blockmin_prim, (unsigned int)N);
-    computeMinimum_kernel<<<nBlocks, blockSize, shmem, stream>>>(d_tmp_dual, d_blockmin_dual, (unsigned int)N);
+    computeMinimum_kernel<<<nBlocks, blockSize, shmem, stream>>>(d_tmp_prim, d_blockmin_prim, static_cast<unsigned int>(N));
+    computeMinimum_kernel<<<nBlocks, blockSize, shmem, stream>>>(d_tmp_dual, d_blockmin_dual, static_cast<unsigned int>(N));
 
     // Step 3: final reduction on GPU (1 block)
     int finalBlockSize = 1;

@@ -1,8 +1,12 @@
 #include <algorithm>
 #include <cctype>
+#include <boost/program_options.hpp>
+
 #include "sypha_environment.h"
 #include "sypha_environment_defaults.h"
 #include "sypha_cuda_helper.h"
+
+namespace po = boost::program_options;
 
 SyphaEnvironment::SyphaEnvironment()
 {
@@ -10,13 +14,13 @@ SyphaEnvironment::SyphaEnvironment()
 
 SyphaEnvironment::SyphaEnvironment(int argc, char *argv[])
 {
-    this->internalStatus = CODE_SUCCESFULL;
+    this->internalStatus = CODE_SUCCESSFUL;
     this->internalStatus = this->setDefaultParameters();
-    if (this->internalStatus == CODE_SUCCESFULL)
+    if (this->internalStatus == CODE_SUCCESSFUL)
     {
-        logger_ = new SyphaLogger(this->timer(), LOG_INFO);
+        logger_ = std::make_unique<SyphaLogger>(this->timer(), LOG_INFO);
         this->internalStatus = this->readInputArguments(argc, argv);
-        if (this->internalStatus == CODE_SUCCESFULL)
+        if (this->internalStatus == CODE_SUCCESSFUL)
         {
             SyphaLogLevel logLevel;
             if (verbosityLevel <= 0)
@@ -42,8 +46,6 @@ SyphaEnvironment::~SyphaEnvironment()
     if (logger_)
     {
         logger_->flush();
-        delete logger_;
-        logger_ = nullptr;
     }
 }
 
@@ -84,7 +86,7 @@ SyphaStatus SyphaEnvironment::setDefaultParameters()
     this->preprocessColumnStrategies = sypha_environment_defaults::kPreprocessColumnStrategies();
     this->preprocessTimeLimitSeconds = sypha_environment_defaults::kPreprocessTimeLimitSeconds;
 
-    return CODE_SUCCESFULL;
+    return CODE_SUCCESSFUL;
 }
 
 SyphaStatus SyphaEnvironment::setUpDevice()
@@ -93,22 +95,22 @@ SyphaStatus SyphaEnvironment::setUpDevice()
     logger_->log(LOG_DEBUG, "Setting up CUDA device");
     this->cudaDeviceId = findCudaDevice(this->cudaDeviceId);
 
-    return CODE_SUCCESFULL;
+    return CODE_SUCCESSFUL;
 }
 
 SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
 {
-    string modelType;
+    std::string modelType;
 
     try
     {
         po::options_description desc("Allowed options");
         desc.add_options()
             ("help", "produce help message")
-            ("unit-tests", po::value<string>(&this->test)->default_value("none"), "launch unit tests")
+            ("unit-tests", po::value<std::string>(&this->test)->default_value("none"), "launch unit tests")
             ("unit-tests-rep", po::value<int>(&this->testRepeat)->default_value(1), "set number of repeats for each test")
-            ("input-file", po::value<string>(&this->inputFilePath), "set input file path")
-            ("model", po::value<string>(&modelType), "set input model type (scp)")
+            ("input-file", po::value<std::string>(&this->inputFilePath), "set input file path")
+            ("model", po::value<std::string>(&modelType), "set input model type (scp)")
             ("sparse", po::value<bool>(&this->sparse)->default_value(true), "import model as sparse model")
             ("time-limit", po::value<double>(&this->timeLimit), "set time limit")
             ("seed", po::value<int>(&this->seed), "set random seed")
@@ -119,7 +121,7 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
             ("show-solution", po::bool_switch(&this->showSolution)->default_value(sypha_environment_defaults::kShowSolution), "show final solution summary")
             ("mehrotra-max-iter", po::value<int>(&this->mehrotraMaxIter)->default_value(sypha_environment_defaults::kMehrotraMaxIter), "set max iterations for Mehrotra IPM")
             ("dense-memory-threshold", po::value<double>(&this->denseGpuMemoryFractionThreshold)->default_value(sypha_environment_defaults::kDenseGpuMemoryFractionThreshold), "use dense KKT solver when dense matrix bytes < this fraction of total GPU memory")
-            ("linear-solver", po::value<string>(&this->linearSolverStrategy)->default_value(sypha_environment_defaults::kLinearSolverStrategy()), "linear solver strategy: auto|dense|sparse_qr|krylov")
+            ("linear-solver", po::value<std::string>(&this->linearSolverStrategy)->default_value(sypha_environment_defaults::kLinearSolverStrategy()), "linear solver strategy: auto|dense|sparse_qr|krylov")
             ("krylov-max-cg-iter", po::value<int>(&this->krylovMaxCgIter)->default_value(sypha_environment_defaults::kKrylovMaxCgIter), "max CG iterations for Krylov solver")
             ("krylov-cg-tol-initial", po::value<double>(&this->krylovCgTolInitial)->default_value(sypha_environment_defaults::kKrylovCgTolInitial), "initial CG relative tolerance")
             ("krylov-cg-tol-final", po::value<double>(&this->krylovCgTolFinal)->default_value(sypha_environment_defaults::kKrylovCgTolFinal), "final CG relative tolerance")
@@ -131,13 +133,13 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
             ("bnb-gap-stall-iters", po::value<int>(&this->bnbGapStallBranchIters)->default_value(sypha_environment_defaults::kBnbGapStallBranchIters), "branch if primal/dual gap does not improve for this many iterations")
             ("bnb-gap-stall-pct", po::value<double>(&this->bnbGapStallMinImprovPct)->default_value(sypha_environment_defaults::kBnbGapStallMinImprovPct), "minimum gap improvement percentage to reset stall counter")
             ("bnb-int-tol", po::value<double>(&this->bnbIntegralityTol)->default_value(sypha_environment_defaults::kBnbIntegralityTol), "integrality tolerance for BnB")
-            ("bnb-var-select", po::value<string>(&this->bnbVarSelectionStrategy)->default_value(sypha_environment_defaults::kBnbVarSelectionStrategy()), "variable selection strategy: most_fractional|highest_cost_fractional")
+            ("bnb-var-select", po::value<std::string>(&this->bnbVarSelectionStrategy)->default_value(sypha_environment_defaults::kBnbVarSelectionStrategy()), "variable selection strategy: most_fractional|highest_cost_fractional")
             ("bnb-int-heur-every", po::value<int>(&this->bnbHeuristicEveryNNodes)->default_value(sypha_environment_defaults::kBnbHeuristicEveryNNodes), "run integer heuristics every n BnB nodes")
-            ("bnb-int-heuristics", po::value<string>(&this->bnbIntHeuristics)->default_value(sypha_environment_defaults::kBnbIntHeuristics()), "comma-separated integer heuristics")
+            ("bnb-int-heuristics", po::value<std::string>(&this->bnbIntHeuristics)->default_value(sypha_environment_defaults::kBnbIntHeuristics()), "comma-separated integer heuristics")
             ("bnb-log-interval-sec", po::value<double>(&this->bnbLogIntervalSeconds)->default_value(sypha_environment_defaults::kBnbLogIntervalSeconds), "seconds between branch-and-bound progress logs (<=0 disables)")
             ("bnb-hard-time-limit-sec", po::value<double>(&this->bnbHardTimeLimitSeconds)->default_value(sypha_environment_defaults::kBnbHardTimeLimitSeconds), "hard time limit for branch-and-bound in seconds (<=0 disables)")
             ("bnb-gap-stagnation-window", po::value<int>(&this->bnbGapStagnationWindow)->default_value(sypha_environment_defaults::kBnbGapStagnationWindow), "reduce LP iterations when MIP gap stagnates for this many BnB nodes (<=0 disables)")
-            ("preprocess-columns", po::value<string>(&this->preprocessColumnStrategies)->default_value(sypha_environment_defaults::kPreprocessColumnStrategies()), "comma-separated preprocessing rules: single_column_dominance,two_column_dominance,none")
+            ("preprocess-columns", po::value<std::string>(&this->preprocessColumnStrategies)->default_value(sypha_environment_defaults::kPreprocessColumnStrategies()), "comma-separated preprocessing rules: single_column_dominance,two_column_dominance,none")
             ("preprocess-time-limit-sec", po::value<double>(&this->preprocessTimeLimitSeconds)->default_value(sypha_environment_defaults::kPreprocessTimeLimitSeconds), "time limit in seconds for column dominance preprocessing (<=0 disables)");
 
         po::variables_map vm;
@@ -146,13 +148,13 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
 
         if (vm.count("help"))
         {
-            cout << desc << "\n";
+            std::cout << desc << "\n";
             return CODE_GENERIC_ERROR;
         }
 
         if (vm.count("input-file"))
         {
-            logger_->log(LOG_DEBUG, "Input file: %s", vm["input-file"].as<string>().c_str());
+            logger_->log(LOG_DEBUG, "Input file: %s", vm["input-file"].as<std::string>().c_str());
         }
         else
         {
@@ -161,7 +163,7 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         }
         if (vm.count("model"))
         {
-            string modelStr = vm["model"].as<string>();
+            std::string modelStr = vm["model"].as<std::string>();
             std::transform(modelStr.begin(), modelStr.end(), modelStr.begin(),
                            [](unsigned char c)
                            { return std::tolower(c); });
@@ -171,10 +173,10 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
             }
             else
             {
-                logger_->log(LOG_ERROR, "Unsupported model type: %s", vm["model"].as<string>().c_str());
+                logger_->log(LOG_ERROR, "Unsupported model type: %s", vm["model"].as<std::string>().c_str());
                 return CODE_GENERIC_ERROR;
             }
-            logger_->log(LOG_DEBUG, "Model type: %s", vm["model"].as<string>().c_str());
+            logger_->log(LOG_DEBUG, "Model type: %s", vm["model"].as<std::string>().c_str());
         }
         else
         {
@@ -214,7 +216,7 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         logger_->log(LOG_DEBUG, "BnB auto fallback LP: %s", this->bnbAutoFallbackLp ? "true" : "false");
         this->denseGpuMemoryFractionThreshold = std::max(0.0, this->denseGpuMemoryFractionThreshold);
     }
-    catch (exception &e)
+    catch (std::exception &e)
     {
         if (logger_)
             logger_->log(LOG_ERROR, "Argument parsing failed: %s", e.what());
@@ -231,38 +233,72 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         return CODE_GENERIC_ERROR;
     }
 
-    return CODE_SUCCESFULL;
+    return CODE_SUCCESSFUL;
 }
 
-SyphaLogger *SyphaEnvironment::getLogger()
+SyphaLogger *SyphaEnvironment::getLogger() const
 {
-    return logger_;
+    return logger_.get();
 }
 
-int SyphaEnvironment::getVerbosityLevel()
+int SyphaEnvironment::getVerbosityLevel() const
 {
     return this->verbosityLevel;
 }
 
-bool SyphaEnvironment::getShowSolution()
+bool SyphaEnvironment::getShowSolution() const
 {
     return this->showSolution;
 }
 
-std::string SyphaEnvironment::getTest()
+std::string SyphaEnvironment::getTest() const
 {
     return this->test;
 }
 
-SyphaStatus SyphaEnvironment::getStatus()
+SyphaStatus SyphaEnvironment::getStatus() const
 {
     return this->internalStatus;
 }
 
-double SyphaEnvironment::timer()
+double SyphaEnvironment::timer() const
 {
-    struct timeval timerStop, timerElapsed;
-    gettimeofday(&timerElapsed, NULL);
-    // timersub(&timerStop, &timerStart, &timerElapsed);
-    return timerElapsed.tv_sec * 1000.0 + timerElapsed.tv_usec / 1000.0;
+    using namespace std::chrono;
+    auto now = steady_clock::now();
+    return duration<double, std::milli>(now.time_since_epoch()).count();
 }
+
+ModelInputType SyphaEnvironment::getModelType() const { return this->modelType; }
+const std::string &SyphaEnvironment::getInputFilePath() const { return this->inputFilePath; }
+double SyphaEnvironment::getPxInfinity() const { return this->pxInfinity; }
+double SyphaEnvironment::getPxTolerance() const { return this->pxTolerance; }
+
+int SyphaEnvironment::getMehrotraMaxIter() const { return this->mehrotraMaxIter; }
+double SyphaEnvironment::getMehrotraEta() const { return this->mehrotraEta; }
+double SyphaEnvironment::getMehrotraMuTol() const { return this->mehrotraMuTol; }
+double SyphaEnvironment::getMehrotraCholTol() const { return this->mehrotraCholTol; }
+int SyphaEnvironment::getMehrotraReorder() const { return this->mehrotraReorder; }
+double SyphaEnvironment::getDenseGpuMemoryFractionThreshold() const { return this->denseGpuMemoryFractionThreshold; }
+
+const std::string &SyphaEnvironment::getLinearSolverStrategy() const { return this->linearSolverStrategy; }
+int SyphaEnvironment::getKrylovMaxCgIter() const { return this->krylovMaxCgIter; }
+double SyphaEnvironment::getKrylovCgTolInitial() const { return this->krylovCgTolInitial; }
+double SyphaEnvironment::getKrylovCgTolFinal() const { return this->krylovCgTolFinal; }
+double SyphaEnvironment::getKrylovCgTolDecayRate() const { return this->krylovCgTolDecayRate; }
+
+int SyphaEnvironment::getBnbMaxNodes() const { return this->bnbMaxNodes; }
+int SyphaEnvironment::getBnbDeviceQueueCapacity() const { return this->bnbDeviceQueueCapacity; }
+int SyphaEnvironment::getBnbGapStallBranchIters() const { return this->bnbGapStallBranchIters; }
+double SyphaEnvironment::getBnbGapStallMinImprovPct() const { return this->bnbGapStallMinImprovPct; }
+double SyphaEnvironment::getBnbIntegralityTol() const { return this->bnbIntegralityTol; }
+const std::string &SyphaEnvironment::getBnbVarSelectionStrategy() const { return this->bnbVarSelectionStrategy; }
+int SyphaEnvironment::getBnbHeuristicEveryNNodes() const { return this->bnbHeuristicEveryNNodes; }
+const std::string &SyphaEnvironment::getBnbIntHeuristics() const { return this->bnbIntHeuristics; }
+double SyphaEnvironment::getBnbLogIntervalSeconds() const { return this->bnbLogIntervalSeconds; }
+double SyphaEnvironment::getBnbHardTimeLimitSeconds() const { return this->bnbHardTimeLimitSeconds; }
+int SyphaEnvironment::getBnbGapStagnationWindow() const { return this->bnbGapStagnationWindow; }
+bool SyphaEnvironment::getBnbDisable() const { return this->bnbDisable; }
+bool SyphaEnvironment::getBnbAutoFallbackLp() const { return this->bnbAutoFallbackLp; }
+
+const std::string &SyphaEnvironment::getPreprocessColumnStrategies() const { return this->preprocessColumnStrategies; }
+double SyphaEnvironment::getPreprocessTimeLimitSeconds() const { return this->preprocessTimeLimitSeconds; }

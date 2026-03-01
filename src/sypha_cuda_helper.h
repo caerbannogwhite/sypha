@@ -85,15 +85,6 @@ static const char *_cudaGetErrorEnum(cudaError_t error)
     return cudaGetErrorName(error);
 }
 
-// CUDA Driver API errors
-/*static const char *_cudaGetErrorEnum(CUresult error)
-{
-    static char unknown[] = "<unknown>";
-    const char *ret = NULL;
-    cuGetErrorName(error, &ret);
-    return ret ? ret : unknown;
-}*/
-
 // cuBLAS API errors
 static const char *_cudaGetErrorEnum(cublasStatus_t error)
 {

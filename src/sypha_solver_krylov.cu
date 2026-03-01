@@ -91,27 +91,27 @@ void initializeKrylovWorkspace(KrylovSolveWorkspace *ws, int m, int n)
         return;
 
     // Free old allocations if growing
-    if (ws->d_r) { checkCudaErrors(cudaFree(ws->d_r)); ws->d_r = NULL; }
-    if (ws->d_z) { checkCudaErrors(cudaFree(ws->d_z)); ws->d_z = NULL; }
-    if (ws->d_p) { checkCudaErrors(cudaFree(ws->d_p)); ws->d_p = NULL; }
-    if (ws->d_Ap) { checkCudaErrors(cudaFree(ws->d_Ap)); ws->d_Ap = NULL; }
-    if (ws->d_ne_rhs) { checkCudaErrors(cudaFree(ws->d_ne_rhs)); ws->d_ne_rhs = NULL; }
-    if (ws->d_precond_diag) { checkCudaErrors(cudaFree(ws->d_precond_diag)); ws->d_precond_diag = NULL; }
-    if (ws->d_tmp_n) { checkCudaErrors(cudaFree(ws->d_tmp_n)); ws->d_tmp_n = NULL; }
-    if (ws->d_D2) { checkCudaErrors(cudaFree(ws->d_D2)); ws->d_D2 = NULL; }
+    if (ws->d_r) { checkCudaErrors(cudaFree(ws->d_r)); ws->d_r = nullptr; }
+    if (ws->d_z) { checkCudaErrors(cudaFree(ws->d_z)); ws->d_z = nullptr; }
+    if (ws->d_p) { checkCudaErrors(cudaFree(ws->d_p)); ws->d_p = nullptr; }
+    if (ws->d_Ap) { checkCudaErrors(cudaFree(ws->d_Ap)); ws->d_Ap = nullptr; }
+    if (ws->d_ne_rhs) { checkCudaErrors(cudaFree(ws->d_ne_rhs)); ws->d_ne_rhs = nullptr; }
+    if (ws->d_precond_diag) { checkCudaErrors(cudaFree(ws->d_precond_diag)); ws->d_precond_diag = nullptr; }
+    if (ws->d_tmp_n) { checkCudaErrors(cudaFree(ws->d_tmp_n)); ws->d_tmp_n = nullptr; }
+    if (ws->d_D2) { checkCudaErrors(cudaFree(ws->d_D2)); ws->d_D2 = nullptr; }
 
     int allocM = (m > ws->capacityM) ? m : ws->capacityM;
     int allocN = (n > ws->capacityN) ? n : ws->capacityN;
 
-    checkCudaErrors(cudaMalloc((void **)&ws->d_r, sizeof(double) * (size_t)allocM));
-    checkCudaErrors(cudaMalloc((void **)&ws->d_z, sizeof(double) * (size_t)allocM));
-    checkCudaErrors(cudaMalloc((void **)&ws->d_p, sizeof(double) * (size_t)allocM));
-    checkCudaErrors(cudaMalloc((void **)&ws->d_Ap, sizeof(double) * (size_t)allocM));
-    checkCudaErrors(cudaMalloc((void **)&ws->d_ne_rhs, sizeof(double) * (size_t)allocM));
-    checkCudaErrors(cudaMalloc((void **)&ws->d_precond_diag, sizeof(double) * (size_t)allocM));
+    checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&ws->d_r), sizeof(double) * static_cast<size_t>(allocM)));
+    checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&ws->d_z), sizeof(double) * static_cast<size_t>(allocM)));
+    checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&ws->d_p), sizeof(double) * static_cast<size_t>(allocM)));
+    checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&ws->d_Ap), sizeof(double) * static_cast<size_t>(allocM)));
+    checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&ws->d_ne_rhs), sizeof(double) * static_cast<size_t>(allocM)));
+    checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&ws->d_precond_diag), sizeof(double) * static_cast<size_t>(allocM)));
 
-    checkCudaErrors(cudaMalloc((void **)&ws->d_tmp_n, sizeof(double) * (size_t)allocN));
-    checkCudaErrors(cudaMalloc((void **)&ws->d_D2, sizeof(double) * (size_t)allocN));
+    checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&ws->d_tmp_n), sizeof(double) * static_cast<size_t>(allocN)));
+    checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&ws->d_D2), sizeof(double) * static_cast<size_t>(allocN)));
 
     ws->capacityM = allocM;
     ws->capacityN = allocN;
@@ -120,15 +120,15 @@ void initializeKrylovWorkspace(KrylovSolveWorkspace *ws, int m, int n)
 
 void releaseKrylovWorkspace(KrylovSolveWorkspace *ws)
 {
-    if (ws->d_r) { checkCudaErrors(cudaFree(ws->d_r)); ws->d_r = NULL; }
-    if (ws->d_z) { checkCudaErrors(cudaFree(ws->d_z)); ws->d_z = NULL; }
-    if (ws->d_p) { checkCudaErrors(cudaFree(ws->d_p)); ws->d_p = NULL; }
-    if (ws->d_Ap) { checkCudaErrors(cudaFree(ws->d_Ap)); ws->d_Ap = NULL; }
-    if (ws->d_ne_rhs) { checkCudaErrors(cudaFree(ws->d_ne_rhs)); ws->d_ne_rhs = NULL; }
-    if (ws->d_precond_diag) { checkCudaErrors(cudaFree(ws->d_precond_diag)); ws->d_precond_diag = NULL; }
-    if (ws->d_tmp_n) { checkCudaErrors(cudaFree(ws->d_tmp_n)); ws->d_tmp_n = NULL; }
-    if (ws->d_D2) { checkCudaErrors(cudaFree(ws->d_D2)); ws->d_D2 = NULL; }
-    if (ws->d_spmvBuffer) { checkCudaErrors(cudaFree(ws->d_spmvBuffer)); ws->d_spmvBuffer = NULL; }
+    if (ws->d_r) { checkCudaErrors(cudaFree(ws->d_r)); ws->d_r = nullptr; }
+    if (ws->d_z) { checkCudaErrors(cudaFree(ws->d_z)); ws->d_z = nullptr; }
+    if (ws->d_p) { checkCudaErrors(cudaFree(ws->d_p)); ws->d_p = nullptr; }
+    if (ws->d_Ap) { checkCudaErrors(cudaFree(ws->d_Ap)); ws->d_Ap = nullptr; }
+    if (ws->d_ne_rhs) { checkCudaErrors(cudaFree(ws->d_ne_rhs)); ws->d_ne_rhs = nullptr; }
+    if (ws->d_precond_diag) { checkCudaErrors(cudaFree(ws->d_precond_diag)); ws->d_precond_diag = nullptr; }
+    if (ws->d_tmp_n) { checkCudaErrors(cudaFree(ws->d_tmp_n)); ws->d_tmp_n = nullptr; }
+    if (ws->d_D2) { checkCudaErrors(cudaFree(ws->d_D2)); ws->d_D2 = nullptr; }
+    if (ws->d_spmvBuffer) { checkCudaErrors(cudaFree(ws->d_spmvBuffer)); ws->d_spmvBuffer = nullptr; }
     ws->spmvBufferCapacity = 0;
     ws->capacityM = 0;
     ws->capacityN = 0;
@@ -196,13 +196,13 @@ void krylovBuildNormalEquationsRHS(KrylovSolveWorkspace *ws,
 
     // Step 2: ne_rhs = resB
     checkCudaErrors(cudaMemcpyAsync(ws->d_ne_rhs, d_resB,
-                                    sizeof(double) * (size_t)m,
+                                    sizeof(double) * static_cast<size_t>(m),
                                     cudaMemcpyDeviceToDevice, stream));
 
     // Step 3: ne_rhs -= A * tmp_n  (i.e. alpha=-1, beta=1)
     cusparseDnVecDescr_t vecTmpN, vecRhs;
-    checkCudaErrors(cusparseCreateDnVec(&vecTmpN, (int64_t)n, ws->d_tmp_n, CUDA_R_64F));
-    checkCudaErrors(cusparseCreateDnVec(&vecRhs, (int64_t)m, ws->d_ne_rhs, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&vecTmpN, static_cast<int64_t>(n), ws->d_tmp_n, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&vecRhs, static_cast<int64_t>(m), ws->d_ne_rhs, CUDA_R_64F));
 
     double alpha = -1.0, beta = 1.0;
     size_t bufSize = 0;
@@ -245,15 +245,15 @@ int krylovSolveCG(KrylovSolveWorkspace *ws,
     if (rhsNorm < 1e-30)
     {
         // RHS is zero => solution is zero
-        checkCudaErrors(cudaMemsetAsync(d_dy, 0, sizeof(double) * (size_t)m, stream));
+        checkCudaErrors(cudaMemsetAsync(d_dy, 0, sizeof(double) * static_cast<size_t>(m), stream));
         return 0;
     }
 
     // Create dense vector descriptors for SpMV
     cusparseDnVecDescr_t vecP, vecTmpN, vecAp;
-    checkCudaErrors(cusparseCreateDnVec(&vecP, (int64_t)m, ws->d_p, CUDA_R_64F));
-    checkCudaErrors(cusparseCreateDnVec(&vecTmpN, (int64_t)n, ws->d_tmp_n, CUDA_R_64F));
-    checkCudaErrors(cusparseCreateDnVec(&vecAp, (int64_t)m, ws->d_Ap, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&vecP, static_cast<int64_t>(m), ws->d_p, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&vecTmpN, static_cast<int64_t>(n), ws->d_tmp_n, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&vecAp, static_cast<int64_t>(m), ws->d_Ap, CUDA_R_64F));
 
     // Ensure SpMV buffer is large enough for both transpose and non-transpose
     {
@@ -274,11 +274,11 @@ int krylovSolveCG(KrylovSolveWorkspace *ws,
     }
 
     // Initial guess: dy = 0
-    checkCudaErrors(cudaMemsetAsync(d_dy, 0, sizeof(double) * (size_t)m, stream));
+    checkCudaErrors(cudaMemsetAsync(d_dy, 0, sizeof(double) * static_cast<size_t>(m), stream));
 
     // r = rhs (since A D^2 A^T * 0 = 0)
     checkCudaErrors(cudaMemcpyAsync(ws->d_r, d_rhs,
-                                    sizeof(double) * (size_t)m,
+                                    sizeof(double) * static_cast<size_t>(m),
                                     cudaMemcpyDeviceToDevice, stream));
 
     // z = M^{-1} r (Jacobi preconditioner)
@@ -290,7 +290,7 @@ int krylovSolveCG(KrylovSolveWorkspace *ws,
 
     // p = z
     checkCudaErrors(cudaMemcpyAsync(ws->d_p, ws->d_z,
-                                    sizeof(double) * (size_t)m,
+                                    sizeof(double) * static_cast<size_t>(m),
                                     cudaMemcpyDeviceToDevice, stream));
 
     // rz = dot(r, z)
@@ -409,13 +409,13 @@ void krylovRecoverDxDs(KrylovSolveWorkspace *ws,
 {
     // ds = resC
     checkCudaErrors(cudaMemcpyAsync(d_ds, d_resC,
-                                    sizeof(double) * (size_t)n,
+                                    sizeof(double) * static_cast<size_t>(n),
                                     cudaMemcpyDeviceToDevice, stream));
 
     // ds -= A^T * dy
     cusparseDnVecDescr_t vecDy, vecDs;
-    checkCudaErrors(cusparseCreateDnVec(&vecDy, (int64_t)m, const_cast<double *>(d_dy), CUDA_R_64F));
-    checkCudaErrors(cusparseCreateDnVec(&vecDs, (int64_t)n, d_ds, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&vecDy, static_cast<int64_t>(m), const_cast<double *>(d_dy), CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&vecDs, static_cast<int64_t>(n), d_ds, CUDA_R_64F));
 
     double alpha = -1.0, beta = 1.0;
     size_t bufSize = 0;

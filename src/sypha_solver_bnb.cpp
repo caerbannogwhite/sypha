@@ -9,15 +9,15 @@
 DeviceNodeWindow::DeviceNodeWindow(int capacity)
 {
     cap = (capacity > 0) ? capacity : 1;
-    checkCudaErrors(cudaMalloc((void **)&dEntries, sizeof(DeviceQueueEntry) * (size_t)cap));
+    checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&dEntries), sizeof(DeviceQueueEntry) * static_cast<size_t>(cap)));
 }
 
 DeviceNodeWindow::~DeviceNodeWindow()
 {
-    if (dEntries != NULL)
+    if (dEntries != nullptr)
     {
         checkCudaErrors(cudaFree(dEntries));
-        dEntries = NULL;
+        dEntries = nullptr;
     }
 }
 
@@ -31,8 +31,8 @@ bool DeviceNodeWindow::refill(std::deque<int> &frontier, const std::vector<Branc
     hostWindow.clear();
     cursor = 0;
 
-    const int fillCount = std::min((int)frontier.size(), cap);
-    hostWindow.reserve((size_t)fillCount);
+    const int fillCount = std::min(static_cast<int>(frontier.size()), cap);
+    hostWindow.reserve(static_cast<size_t>(fillCount));
 
     for (int i = 0; i < fillCount; ++i)
     {
@@ -41,15 +41,15 @@ bool DeviceNodeWindow::refill(std::deque<int> &frontier, const std::vector<Branc
 
         DeviceQueueEntry entry;
         entry.nodeId = nodeId;
-        entry.depth = states[(size_t)nodeId].depth;
-        if (states[(size_t)nodeId].decisions.empty())
+        entry.depth = states[static_cast<size_t>(nodeId)].depth;
+        if (states[static_cast<size_t>(nodeId)].decisions.empty())
         {
             entry.lastVar = -1;
             entry.lastFixValue = -1;
         }
         else
         {
-            const BranchDecision &last = states[(size_t)nodeId].decisions.back();
+            const BranchDecision &last = states[static_cast<size_t>(nodeId)].decisions.back();
             entry.lastVar = last.varIndex;
             entry.lastFixValue = last.fixValue;
         }
@@ -97,23 +97,23 @@ BaseModelReductionResult reduce_base_model(
     BaseRelaxationModel &base, double incumbentBound, double tol)
 {
     BaseModelReductionResult result;
-    result.oldToNew.assign((size_t)base.ncolsOriginal, 0);
+    result.oldToNew.assign(static_cast<size_t>(base.ncolsOriginal), 0);
 
     std::vector<int> newToOld;
     std::vector<int> newActiveToOriginal;
     int newCol = 0;
     for (int oldCol = 0; oldCol < base.ncolsOriginal; ++oldCol)
     {
-        if (base.obj[(size_t)oldCol] + tol >= incumbentBound)
+        if (base.obj[static_cast<size_t>(oldCol)] + tol >= incumbentBound)
         {
-            result.oldToNew[(size_t)oldCol] = -1;
+            result.oldToNew[static_cast<size_t>(oldCol)] = -1;
             ++result.columnsRemoved;
         }
         else
         {
-            result.oldToNew[(size_t)oldCol] = newCol;
+            result.oldToNew[static_cast<size_t>(oldCol)] = newCol;
             newToOld.push_back(oldCol);
-            newActiveToOriginal.push_back(base.activeToOriginalCol[(size_t)oldCol]);
+            newActiveToOriginal.push_back(base.activeToOriginalCol[static_cast<size_t>(oldCol)]);
             ++newCol;
         }
     }
@@ -124,26 +124,26 @@ BaseModelReductionResult reduce_base_model(
     const int newNcolsOriginal = newCol;
 
     // Rebuild objective
-    std::vector<double> newObj((size_t)(newNcolsOriginal + base.nrows), 0.0);
+    std::vector<double> newObj(static_cast<size_t>(newNcolsOriginal + base.nrows), 0.0);
     for (int j = 0; j < newNcolsOriginal; ++j)
-        newObj[(size_t)j] = base.obj[(size_t)newToOld[(size_t)j]];
+        newObj[static_cast<size_t>(j)] = base.obj[static_cast<size_t>(newToOld[static_cast<size_t>(j)])];
 
     // Rebuild CSR
     std::vector<int> newCsrInds;
     std::vector<int> newCsrOffs;
     std::vector<double> newCsrVals;
-    newCsrOffs.reserve((size_t)base.nrows + 1);
+    newCsrOffs.reserve(static_cast<size_t>(base.nrows) + 1);
     newCsrOffs.push_back(0);
 
     for (int i = 0; i < base.nrows; ++i)
     {
-        for (int k = base.csrOffs[(size_t)i]; k < base.csrOffs[(size_t)i + 1]; ++k)
+        for (int k = base.csrOffs[static_cast<size_t>(i)]; k < base.csrOffs[static_cast<size_t>(i) + 1]; ++k)
         {
-            const int oldCol2 = base.csrInds[(size_t)k];
-            const double val = base.csrVals[(size_t)k];
+            const int oldCol2 = base.csrInds[static_cast<size_t>(k)];
+            const double val = base.csrVals[static_cast<size_t>(k)];
             if (oldCol2 >= 0 && oldCol2 < base.ncolsOriginal)
             {
-                const int mapped = result.oldToNew[(size_t)oldCol2];
+                const int mapped = result.oldToNew[static_cast<size_t>(oldCol2)];
                 if (mapped >= 0)
                 {
                     newCsrInds.push_back(mapped);
@@ -157,12 +157,12 @@ BaseModelReductionResult reduce_base_model(
                 newCsrVals.push_back(val);
             }
         }
-        newCsrOffs.push_back((int)newCsrVals.size());
+        newCsrOffs.push_back(static_cast<int>(newCsrVals.size()));
     }
 
     base.ncolsOriginal = newNcolsOriginal;
     base.ncols = newNcolsOriginal + base.nrows;
-    base.nnz = (int)newCsrVals.size();
+    base.nnz = static_cast<int>(newCsrVals.size());
     base.csrInds = std::move(newCsrInds);
     base.csrOffs = std::move(newCsrOffs);
     base.csrVals = std::move(newCsrVals);
@@ -178,11 +178,11 @@ bool remap_branch_node(BranchNodeState &branchNode, const std::vector<int> &oldT
     newDecisions.reserve(branchNode.decisions.size());
     for (const BranchDecision &d : branchNode.decisions)
     {
-        if (d.varIndex < 0 || d.varIndex >= (int)oldToNew.size())
+        if (d.varIndex < 0 || d.varIndex >= static_cast<int>(oldToNew.size()))
         {
             continue;
         }
-        const int newVar = oldToNew[(size_t)d.varIndex];
+        const int newVar = oldToNew[static_cast<size_t>(d.varIndex)];
         if (newVar < 0)
         {
             // Column was removed
@@ -219,7 +219,7 @@ bool is_binary_integral_solution(const std::vector<double> &x, int ncolsOriginal
 {
     for (int j = 0; j < ncolsOriginal; ++j)
     {
-        const double v = x[(size_t)j];
+        const double v = x[static_cast<size_t>(j)];
         const double nearest = floor(v + 0.5);
         if (fabs(v - nearest) > tol)
         {
@@ -236,10 +236,10 @@ bool is_binary_integral_solution(const std::vector<double> &x, int ncolsOriginal
 std::vector<int> collect_fractional_candidates(const std::vector<double> &x, int ncolsOriginal, double tol)
 {
     std::vector<int> candidates;
-    candidates.reserve((size_t)ncolsOriginal);
+    candidates.reserve(static_cast<size_t>(ncolsOriginal));
     for (int j = 0; j < ncolsOriginal; ++j)
     {
-        const double v = x[(size_t)j];
+        const double v = x[static_cast<size_t>(j)];
         const double nearest = floor(v + 0.5);
         if ((fabs(v - nearest) > tol) || (nearest < -tol) || (nearest > 1.0 + tol))
         {
@@ -297,21 +297,21 @@ void build_branch_model(const BaseRelaxationModel &base,
     *obj = base.obj;
     *rhs = base.rhs;
 
-    const int extraRows = (int)branchNode.decisions.size();
+    const int extraRows = static_cast<int>(branchNode.decisions.size());
     if (extraRows == 0)
     {
         return;
     }
 
-    csrInds->reserve((size_t)(base.nnz + 2 * extraRows));
-    csrVals->reserve((size_t)(base.nnz + 2 * extraRows));
-    rhs->reserve((size_t)(base.nrows + extraRows));
-    obj->reserve((size_t)(base.ncols + extraRows));
-    csrOffs->reserve((size_t)(base.nrows + extraRows + 1));
+    csrInds->reserve(static_cast<size_t>(base.nnz + 2 * extraRows));
+    csrVals->reserve(static_cast<size_t>(base.nnz + 2 * extraRows));
+    rhs->reserve(static_cast<size_t>(base.nrows + extraRows));
+    obj->reserve(static_cast<size_t>(base.ncols + extraRows));
+    csrOffs->reserve(static_cast<size_t>(base.nrows + extraRows + 1));
 
     for (int row = 0; row < extraRows; ++row)
     {
-        const BranchDecision &d = branchNode.decisions[(size_t)row];
+        const BranchDecision &d = branchNode.decisions[static_cast<size_t>(row)];
         const int slackCol = base.ncols + row;
 
         csrInds->push_back(d.varIndex);
@@ -321,7 +321,7 @@ void build_branch_model(const BaseRelaxationModel &base,
         csrVals->push_back(-1.0);
 
         csrOffs->push_back(csrOffs->back() + 2);
-        rhs->push_back((double)d.fixValue);
+        rhs->push_back(static_cast<double>(d.fixValue));
         obj->push_back(0.0);
     }
 }

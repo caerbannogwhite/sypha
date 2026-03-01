@@ -16,14 +16,14 @@ struct DenseLinearSolveWorkspace
 {
     bool isEnabled = false;
     int nRows = 0;
-    cusparseSpMatDescr_t sparseMatrix = NULL;
-    cusparseDnMatDescr_t denseMatrix = NULL;
-    double *dDenseA = NULL;
-    double *dDenseA_template = NULL; // Static KKT template for incremental update
-    double *dLuWork = NULL;
-    int *dLuPivot = NULL;
-    int *dLuInfo = NULL;
-    void *dSparseToDenseBuffer = NULL;
+    cusparseSpMatDescr_t sparseMatrix = nullptr;
+    cusparseDnMatDescr_t denseMatrix = nullptr;
+    double *dDenseA = nullptr;
+    double *dDenseA_template = nullptr; // Static KKT template for incremental update
+    double *dLuWork = nullptr;
+    int *dLuPivot = nullptr;
+    int *dLuInfo = nullptr;
+    void *dSparseToDenseBuffer = nullptr;
     size_t sparseToDenseBufferSize = 0;
     int luWorkSize = 0;
     bool templateReady = false;
@@ -75,31 +75,31 @@ bool solveDenseLinearSystemFactored(DenseLinearSolveWorkspace *workspace,
  *  Allocated once and reused across B&B nodes to avoid per-node cudaMalloc churn. */
 struct IpmWorkspace
 {
-    int *d_csrAInds = NULL;
-    int *d_csrAOffs = NULL;
-    double *d_csrAVals = NULL;
+    int *d_csrAInds = nullptr;
+    int *d_csrAOffs = nullptr;
+    double *d_csrAVals = nullptr;
     int kktNnzCapacity = 0;
     int kktNrowsCapacity = 0;
 
-    double *d_rhs = NULL;
-    double *d_sol = NULL;
-    double *d_prevSol = NULL;
+    double *d_rhs = nullptr;
+    double *d_sol = nullptr;
+    double *d_prevSol = nullptr;
     int vectorCapacity = 0;
 
-    double *d_tmp_prim = NULL;
-    double *d_tmp_dual = NULL;
-    double *d_blockmin_prim = NULL;
-    double *d_blockmin_dual = NULL;
-    double *d_alphaResult = NULL;
+    double *d_tmp_prim = nullptr;
+    double *d_tmp_dual = nullptr;
+    double *d_blockmin_prim = nullptr;
+    double *d_blockmin_dual = nullptr;
+    double *d_alphaResult = nullptr;
     int alphaCapacity = 0;
     int alphaBlocksCapacity = 0;
 
-    double *d_buffer = NULL;
+    double *d_buffer = nullptr;
     size_t bufferCapacity = 0;
 
-    cusparseMatDescr_t A_descr = NULL;
+    cusparseMatDescr_t A_descr = nullptr;
 
-    KrylovSolveWorkspace *krylov = NULL;
+    KrylovSolveWorkspace *krylov = nullptr;
 
     bool isAllocated = false;
 };

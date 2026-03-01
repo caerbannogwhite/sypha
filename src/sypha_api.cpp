@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 #include <limits>
 #include <numeric>
 #include <vector>
@@ -136,7 +135,7 @@ public:
 
     StandardForm buildStandardForm() const {
         StandardForm sf;
-        const int n = (int)variables_.size();
+        const int n = static_cast<int>(variables_.size());
 
         // First pass: count rows (ranges produce two rows)
         int numRows = 0;
@@ -160,9 +159,9 @@ public:
             double rhsVal;
         };
         std::vector<RowInfo> rowInfos;
-        rowInfos.reserve((size_t)numRows);
+        rowInfos.reserve(static_cast<size_t>(numRows));
 
-        for (int ci = 0; ci < (int)constraints_.size(); ++ci) {
+        for (int ci = 0; ci < static_cast<int>(constraints_.size()); ++ci) {
             const auto& c = constraints_[ci];
             bool hasLb = std::isfinite(c->lb_);
             bool hasUb = std::isfinite(c->ub_);
@@ -194,26 +193,26 @@ public:
         sf.ncolsOriginal = n;
 
         // Build objective
-        sf.obj.resize((size_t)sf.ncols, 0.0);
+        sf.obj.resize(static_cast<size_t>(sf.ncols), 0.0);
         for (const auto& p : objective_.coeffs_) {
             if (p.first >= 0 && p.first < n) {
                 double c = p.second;
                 if (objective_.maximize_) c = -c;
-                sf.obj[(size_t)p.first] = c;
+                sf.obj[static_cast<size_t>(p.first)] = c;
             }
         }
         // Slack variables have zero cost (already initialized)
 
         // Build CSR
-        sf.csrOffs.reserve((size_t)(numRows + 1));
+        sf.csrOffs.reserve(static_cast<size_t>(numRows + 1));
         sf.csrOffs.push_back(0);
-        sf.rhs.resize((size_t)numRows, 0.0);
+        sf.rhs.resize(static_cast<size_t>(numRows), 0.0);
 
         int slackCol = n;  // next slack column index
 
         for (int ri = 0; ri < numRows; ++ri) {
-            const RowInfo& info = rowInfos[(size_t)ri];
-            const auto& c = constraints_[(size_t)info.constraintIdx];
+            const RowInfo& info = rowInfos[static_cast<size_t>(ri)];
+            const auto& c = constraints_[static_cast<size_t>(info.constraintIdx)];
 
             if (info.isEquality) {
                 // Ax = b: coefficients as-is, no slack
@@ -221,7 +220,7 @@ public:
                     sf.csrInds.push_back(p.first);
                     sf.csrVals.push_back(p.second);
                 }
-                sf.rhs[(size_t)ri] = info.rhsVal;
+                sf.rhs[static_cast<size_t>(ri)] = info.rhsVal;
             } else if (info.isGe) {
                 // >= lb: row coefficients as-is, add surplus (coeff -1), rhs = lb
                 for (const auto& p : c->coeffs_) {
@@ -231,7 +230,7 @@ public:
                 sf.csrInds.push_back(slackCol);
                 sf.csrVals.push_back(-1.0);
                 slackCol++;
-                sf.rhs[(size_t)ri] = info.rhsVal;
+                sf.rhs[static_cast<size_t>(ri)] = info.rhsVal;
             } else {
                 // <= ub: negate all coefficients, add surplus (coeff -1), rhs = -ub
                 for (const auto& p : c->coeffs_) {
@@ -241,10 +240,10 @@ public:
                 sf.csrInds.push_back(slackCol);
                 sf.csrVals.push_back(-1.0);
                 slackCol++;
-                sf.rhs[(size_t)ri] = -info.rhsVal;
+                sf.rhs[static_cast<size_t>(ri)] = -info.rhsVal;
             }
 
-            sf.csrOffs.push_back((int)sf.csrVals.size());
+            sf.csrOffs.push_back(static_cast<int>(sf.csrVals.size()));
         }
 
         return sf;
@@ -280,7 +279,7 @@ public:
         env.krylovCgTolDecayRate = params_.krylov_cg_tol_decay_rate;
         env.modelType = MODEL_TYPE_SCP;
         env.inputFilePath = "";
-        env.internalStatus = CODE_SUCCESFULL;
+        env.internalStatus = CODE_SUCCESSFUL;
 
         // Init logger
         SyphaLogLevel logLevel;
@@ -293,13 +292,13 @@ public:
         else
             logLevel = LOG_TRACE;
 
-        env.logger_ = new SyphaLogger(env.timer(), logLevel);
+        env.logger_ = std::make_unique<SyphaLogger>(env.timer(), logLevel);
         if (params_.bnb_hard_time_limit_sec > 0.0)
             env.logger_->setHardTimeLimit(params_.bnb_hard_time_limit_sec * 1000.0);
 
         // CUDA device setup
         SyphaStatus devStatus = env.setUpDevice();
-        if (devStatus != CODE_SUCCESFULL) {
+        if (devStatus != CODE_SUCCESSFUL) {
             last_status_ = ResultStatus::ABNORMAL;
             return last_status_;
         }
@@ -311,26 +310,22 @@ public:
         node.ncols = sf.ncols;
         node.ncolsOriginal = sf.ncolsOriginal;
         node.ncolsInputOriginal = sf.ncolsOriginal;
-        node.nnz = (int)sf.csrVals.size();
+        node.nnz = static_cast<int>(sf.csrVals.size());
 
-        *node.hCsrMatInds = std::move(sf.csrInds);
-        *node.hCsrMatOffs = std::move(sf.csrOffs);
-        *node.hCsrMatVals = std::move(sf.csrVals);
+        node.hCsrMatInds = std::move(sf.csrInds);
+        node.hCsrMatOffs = std::move(sf.csrOffs);
+        node.hCsrMatVals = std::move(sf.csrVals);
 
-        // Objective & RHS: allocated with calloc to match destructor's free()
-        node.hObjDns = (double*)calloc((size_t)sf.ncols, sizeof(double));
-        std::memcpy(node.hObjDns, sf.obj.data(), sizeof(double) * (size_t)sf.ncols);
-
-        node.hRhsDns = (double*)calloc((size_t)sf.nrows, sizeof(double));
-        std::memcpy(node.hRhsDns, sf.rhs.data(), sizeof(double) * (size_t)sf.nrows);
+        node.hObjDns = std::move(sf.obj);
+        node.hRhsDns = std::move(sf.rhs);
 
         // Identity mapping for active-to-input columns
-        node.hActiveToInputCols->resize((size_t)sf.ncolsOriginal);
-        std::iota(node.hActiveToInputCols->begin(), node.hActiveToInputCols->end(), 0);
+        node.hActiveToInputCols.resize(static_cast<size_t>(sf.ncolsOriginal));
+        std::iota(node.hActiveToInputCols.begin(), node.hActiveToInputCols.end(), 0);
 
         // Copy model to GPU
         SyphaStatus copyStatus = node.copyModelOnDevice();
-        if (copyStatus != CODE_SUCCESFULL) {
+        if (copyStatus != CODE_SUCCESSFUL) {
             last_status_ = ResultStatus::ABNORMAL;
             return last_status_;
         }
@@ -354,7 +349,7 @@ public:
             nodes_ = 0;
             wall_time_ = (env.timer() - timeStart) / 1000.0;
 
-            if (status != CODE_SUCCESFULL || result.status != CODE_SUCCESFULL) {
+            if (status != CODE_SUCCESSFUL || result.status != CODE_SUCCESSFUL) {
                 if (result.terminationReason == SOLVER_TERM_INFEASIBLE_OR_NUMERICAL) {
                     last_status_ = ResultStatus::INFEASIBLE;
                 } else {
@@ -368,16 +363,16 @@ public:
 
             // Extract primal solution for user variables
             double objVal = 0.0;
-            for (int j = 0; j < (int)variables_.size(); ++j) {
-                double val = (j < (int)result.primalSolution.size()) ? result.primalSolution[(size_t)j] : 0.0;
-                variables_[(size_t)j]->solution_value_ = val;
-                objVal += sf.obj[(size_t)j] * val;
+            for (int j = 0; j < static_cast<int>(variables_.size()); ++j) {
+                double val = (j < static_cast<int>(result.primalSolution.size())) ? result.primalSolution[static_cast<size_t>(j)] : 0.0;
+                variables_[static_cast<size_t>(j)]->solution_value_ = val;
+                objVal += node.hObjDns[static_cast<size_t>(j)] * val;
             }
 
             // Extract dual values for constraints
-            for (int ci = 0; ci < (int)constraints_.size(); ++ci) {
-                if (ci < (int)result.dualSolution.size()) {
-                    constraints_[(size_t)ci]->dual_value_ = result.dualSolution[(size_t)ci];
+            for (int ci = 0; ci < static_cast<int>(constraints_.size()); ++ci) {
+                if (ci < static_cast<int>(result.dualSolution.size())) {
+                    constraints_[static_cast<size_t>(ci)]->dual_value_ = result.dualSolution[static_cast<size_t>(ci)];
                 }
             }
 
@@ -402,7 +397,7 @@ public:
             iterations_ = node.getIterations();
             wall_time_ = (env.timer() - timeStart) / 1000.0;
 
-            if (status != CODE_SUCCESFULL) {
+            if (status != CODE_SUCCESSFUL) {
                 last_status_ = ResultStatus::ABNORMAL;
                 objective_value_ = node.objvalPrim;
                 dual_objective_value_ = node.objvalDual;
@@ -411,10 +406,10 @@ public:
             }
 
             // BnB stores solution in node.hX with ncolsInputOriginal entries
-            if (node.hX && std::isfinite(node.objvalPrim)) {
-                for (int j = 0; j < (int)variables_.size(); ++j) {
-                    double val = (j < node.ncolsInputOriginal) ? node.hX[j] : 0.0;
-                    variables_[(size_t)j]->solution_value_ = val;
+            if (!node.hX.empty() && std::isfinite(node.objvalPrim)) {
+                for (int j = 0; j < static_cast<int>(variables_.size()); ++j) {
+                    double val = (j < static_cast<int>(node.hX.size())) ? node.hX[static_cast<size_t>(j)] : 0.0;
+                    variables_[static_cast<size_t>(j)]->solution_value_ = val;
                 }
             }
 
@@ -459,13 +454,13 @@ Solver::Solver(Solver&&) noexcept = default;
 Solver& Solver::operator=(Solver&&) noexcept = default;
 
 Variable* Solver::MakeNumVar(double lb, double ub, const std::string& name) {
-    int idx = (int)impl_->variables_.size();
+    int idx = static_cast<int>(impl_->variables_.size());
     impl_->variables_.emplace_back(new Variable(idx, lb, ub, false, name));
     return impl_->variables_.back().get();
 }
 
 Variable* Solver::MakeIntVar(double lb, double ub, const std::string& name) {
-    int idx = (int)impl_->variables_.size();
+    int idx = static_cast<int>(impl_->variables_.size());
     impl_->variables_.emplace_back(new Variable(idx, lb, ub, true, name));
     return impl_->variables_.back().get();
 }
@@ -475,7 +470,7 @@ Variable* Solver::MakeBoolVar(const std::string& name) {
 }
 
 Constraint* Solver::MakeRowConstraint(double lb, double ub, const std::string& name) {
-    int idx = (int)impl_->constraints_.size();
+    int idx = static_cast<int>(impl_->constraints_.size());
     impl_->constraints_.emplace_back(new Constraint(idx, lb, ub, name));
     return impl_->constraints_.back().get();
 }
@@ -488,8 +483,8 @@ ResultStatus Solver::Solve() {
     return impl_->solve();
 }
 
-int Solver::num_variables() const { return (int)impl_->variables_.size(); }
-int Solver::num_constraints() const { return (int)impl_->constraints_.size(); }
+int Solver::num_variables() const { return static_cast<int>(impl_->variables_.size()); }
+int Solver::num_constraints() const { return static_cast<int>(impl_->constraints_.size()); }
 double Solver::objective_value() const { return impl_->objective_value_; }
 double Solver::dual_objective_value() const { return impl_->dual_objective_value_; }
 double Solver::mip_gap() const { return impl_->mip_gap_; }

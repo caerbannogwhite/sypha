@@ -1,5 +1,7 @@
 
 #include "sypha_node_sparse.h"
+#include "sypha_solver_sparse.h"
+#include "model_reader.h"
 #include "sypha_preprocessor.h"
 
 SyphaCOOEntry::SyphaCOOEntry(int r, int c, double v)
@@ -22,44 +24,33 @@ SyphaNodeSparse::SyphaNodeSparse(SyphaEnvironment &env)
     this->objvalDual = 0.0;
     this->mipGap = std::numeric_limits<double>::infinity();
 
-    this->hCooMat = new std::vector<SyphaCOOEntry>();
+    // Vectors are default-constructed (empty)
 
-    this->hCsrMatInds = new std::vector<int>();
-    this->hCsrMatOffs = new std::vector<int>();
-    this->hCsrMatVals = new std::vector<double>();
-    this->hActiveToInputCols = new std::vector<int>();
+    dCsrMatInds = nullptr;
+    dCsrMatOffs = nullptr;
+    dCsrMatVals = nullptr;
 
-    hObjDns = NULL;
-    hRhsDns = NULL;
-    hX = NULL;
-    hY = NULL;
-    hS = NULL;
+    dCsrMatTransInds = nullptr;
+    dCsrMatTransOffs = nullptr;
+    dCsrMatTransVals = nullptr;
 
-    dCsrMatInds = NULL;
-    dCsrMatOffs = NULL;
-    dCsrMatVals = NULL;
+    dObjDns = nullptr;
+    dRhsDns = nullptr;
+    dX = nullptr;
+    dY = nullptr;
+    dS = nullptr;
 
-    dCsrMatTransInds = NULL;
-    dCsrMatTransOffs = NULL;
-    dCsrMatTransVals = NULL;
+    matDescr = nullptr;
+    matTransDescr = nullptr;
+    objDescr = nullptr;
+    rhsDescr = nullptr;
 
-    dObjDns = NULL;
-    dRhsDns = NULL;
-    dX = NULL;
-    dY = NULL;
-    dS = NULL;
+    cudaStream = nullptr;
 
-    matDescr = NULL;
-    matTransDescr = NULL;
-    objDescr = NULL;
-    rhsDescr = NULL;
-
-    cudaStream = NULL;
-
-    cublasHandle = NULL;
-    cusparseHandle = NULL;
-    cusolverDnHandle = NULL;
-    cusolverSpHandle = NULL;
+    cublasHandle = nullptr;
+    cusparseHandle = nullptr;
+    cusolverDnHandle = nullptr;
+    cusolverSpHandle = nullptr;
 
     this->setInitValues();
     this->setUpCuda();
@@ -67,28 +58,7 @@ SyphaNodeSparse::SyphaNodeSparse(SyphaEnvironment &env)
 
 SyphaNodeSparse::~SyphaNodeSparse()
 {
-    if (this->hCooMat)
-        this->hCooMat->clear();
-
-    if (this->hCsrMatInds)
-        this->hCsrMatInds->clear();
-    if (this->hCsrMatOffs)
-        this->hCsrMatOffs->clear();
-    if (this->hCsrMatVals)
-        this->hCsrMatVals->clear();
-    if (this->hActiveToInputCols)
-        this->hActiveToInputCols->clear();
-
-    if (this->hObjDns)
-        free(this->hObjDns);
-    if (this->hRhsDns)
-        free(this->hRhsDns);
-    if (this->hX)
-        free(hX);
-    if (this->hY)
-        free(hY);
-    if (this->hS)
-        free(hS);
+    // Vectors are auto-destructed
 
     this->releaseModelOnDevice();
 
@@ -112,59 +82,59 @@ SyphaNodeSparse::~SyphaNodeSparse()
         checkCudaErrors(cudaStreamDestroy(this->cudaStream));
 }
 
-int SyphaNodeSparse::getNumCols()
+int SyphaNodeSparse::getNumCols() const
 {
     return this->ncols;
 }
 
-int SyphaNodeSparse::getNumRows()
+int SyphaNodeSparse::getNumRows() const
 {
     return this->nrows;
 }
 
-int SyphaNodeSparse::getNumNonZero()
+int SyphaNodeSparse::getNumNonZero() const
 {
     return this->nnz;
 }
 
-int SyphaNodeSparse::getIterations()
+int SyphaNodeSparse::getIterations() const
 {
     return this->iterations;
 }
 
-double SyphaNodeSparse::getObjvalPrim()
+double SyphaNodeSparse::getObjvalPrim() const
 {
     return this->objvalPrim;
 }
 
-double SyphaNodeSparse::getObjvalDual()
+double SyphaNodeSparse::getObjvalDual() const
 {
     return this->objvalDual;
 }
 
-double SyphaNodeSparse::getMipGap()
+double SyphaNodeSparse::getMipGap() const
 {
     return this->mipGap;
 }
 
-double SyphaNodeSparse::getTimeStartSol()
+double SyphaNodeSparse::getTimeStartSol() const
 {
     return this->timeStartSolEnd - this->timeStartSolStart;
 }
 
-double SyphaNodeSparse::getTimePreSol()
+double SyphaNodeSparse::getTimePreSol() const
 {
     return this->timePreSolEnd - this->timePreSolStart;
 }
 
-double SyphaNodeSparse::getTimeSolver()
+double SyphaNodeSparse::getTimeSolver() const
 {
     return this->timeSolverEnd - this->timeSolverStart;
 }
 
 SyphaStatus SyphaNodeSparse::solve()
 {
-    if (this->env->bnbDisable)
+    if (this->env->getBnbDisable())
     {
         return solver_sparse_mehrotra(*this);
     }
@@ -173,10 +143,9 @@ SyphaStatus SyphaNodeSparse::solve()
 
 SyphaStatus SyphaNodeSparse::readModel()
 {
-    if (this->env->modelType == MODEL_TYPE_SCP)
+    if (this->env->getModelType() == MODEL_TYPE_SCP)
     {
-        // model_reader_read_scp_file_sparse_coo(*this, this->env->inputFilePath);
-        return model_reader_read_scp_file_sparse_csr(*this, this->env->inputFilePath);
+        return model_reader_read_scp_file_sparse_csr(*this, this->env->getInputFilePath());
     }
     else
     {
@@ -188,29 +157,29 @@ SyphaStatus SyphaNodeSparse::copyModelOnDevice()
 {
     this->releaseModelOnDevice();
 
-    checkCudaErrors(cudaMalloc((void **)&this->dCsrMatInds, sizeof(int) * this->nnz));
-    checkCudaErrors(cudaMalloc((void **)&this->dCsrMatOffs, sizeof(int) * (this->nrows + 1)));
-    checkCudaErrors(cudaMalloc((void **)&this->dCsrMatVals, sizeof(double) * this->nnz));
-    checkCudaErrors(cudaMalloc((void **)&this->dObjDns, sizeof(double) * this->ncols));
-    checkCudaErrors(cudaMalloc((void **)&this->dRhsDns, sizeof(double) * this->nrows));
+    checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&this->dCsrMatInds), sizeof(int) * this->nnz));
+    checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&this->dCsrMatOffs), sizeof(int) * (this->nrows + 1)));
+    checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&this->dCsrMatVals), sizeof(double) * this->nnz));
+    checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&this->dObjDns), sizeof(double) * this->ncols));
+    checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&this->dRhsDns), sizeof(double) * this->nrows));
 
-    checkCudaErrors(cudaMemcpyAsync(this->dCsrMatInds, this->hCsrMatInds->data(),
+    checkCudaErrors(cudaMemcpyAsync(this->dCsrMatInds, this->hCsrMatInds.data(),
                                     sizeof(int) * this->nnz, cudaMemcpyHostToDevice,
                                     this->cudaStream));
 
-    checkCudaErrors(cudaMemcpyAsync(this->dCsrMatOffs, this->hCsrMatOffs->data(),
+    checkCudaErrors(cudaMemcpyAsync(this->dCsrMatOffs, this->hCsrMatOffs.data(),
                                     sizeof(int) * (this->nrows + 1), cudaMemcpyHostToDevice,
                                     this->cudaStream));
 
-    checkCudaErrors(cudaMemcpyAsync(this->dCsrMatVals, this->hCsrMatVals->data(),
+    checkCudaErrors(cudaMemcpyAsync(this->dCsrMatVals, this->hCsrMatVals.data(),
                                     sizeof(double) * this->nnz, cudaMemcpyHostToDevice,
                                     this->cudaStream));
 
-    checkCudaErrors(cudaMemcpyAsync(this->dObjDns, this->hObjDns,
+    checkCudaErrors(cudaMemcpyAsync(this->dObjDns, this->hObjDns.data(),
                                     sizeof(double) * this->ncols, cudaMemcpyHostToDevice,
                                     this->cudaStream));
 
-    checkCudaErrors(cudaMemcpyAsync(this->dRhsDns, this->hRhsDns,
+    checkCudaErrors(cudaMemcpyAsync(this->dRhsDns, this->hRhsDns.data(),
                                     sizeof(double) * this->nrows, cudaMemcpyHostToDevice,
                                     this->cudaStream));
 
@@ -219,19 +188,19 @@ SyphaStatus SyphaNodeSparse::copyModelOnDevice()
                                       CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I, CUSPARSE_INDEX_BASE_ZERO,
                                       CUDA_R_64F));
 
-    checkCudaErrors(cusparseCreateDnVec(&this->objDescr, (int64_t)this->ncols,
-                                        this->hObjDns, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&this->objDescr, static_cast<int64_t>(this->ncols),
+                                        this->hObjDns.data(), CUDA_R_64F));
 
-    checkCudaErrors(cusparseCreateDnVec(&this->rhsDescr, (int64_t)this->nrows,
-                                        this->hRhsDns, CUDA_R_64F));
+    checkCudaErrors(cusparseCreateDnVec(&this->rhsDescr, static_cast<int64_t>(this->nrows),
+                                        this->hRhsDns.data(), CUDA_R_64F));
 
-    return CODE_SUCCESFULL;
+    return CODE_SUCCESSFUL;
 }
 
 SyphaStatus SyphaNodeSparse::preprocessModel(double incumbentUpperBound)
 {
     SyphaStatus s = reduceByIncumbent(incumbentUpperBound);
-    if (s != CODE_SUCCESFULL)
+    if (s != CODE_SUCCESSFUL)
         return s;
     return applyDominancePreprocessing();
 }
@@ -242,16 +211,12 @@ void SyphaNodeSparse::initActiveColTracking()
     {
         this->ncolsInputOriginal = this->ncolsOriginal;
     }
-    if (!this->hActiveToInputCols)
+    if (this->hActiveToInputCols.empty())
     {
-        this->hActiveToInputCols = new std::vector<int>();
-    }
-    if (this->hActiveToInputCols->empty())
-    {
-        this->hActiveToInputCols->resize((size_t)this->ncolsOriginal);
+        this->hActiveToInputCols.resize(static_cast<size_t>(this->ncolsOriginal));
         for (int j = 0; j < this->ncolsOriginal; ++j)
         {
-            (*this->hActiveToInputCols)[(size_t)j] = j;
+            this->hActiveToInputCols[static_cast<size_t>(j)] = j;
         }
     }
 }
@@ -262,31 +227,31 @@ void SyphaNodeSparse::rebuildCsrAfterRemoval(
     const std::vector<int> &newActiveToInput,
     const double *oldCosts)
 {
-    const int newOriginalCols = (int)newActiveToInput.size();
+    const int newOriginalCols = static_cast<int>(newActiveToInput.size());
     std::vector<int> newCsrInds;
     std::vector<int> newCsrOffs;
     std::vector<double> newCsrVals;
-    std::vector<double> newObj((size_t)(newOriginalCols + this->nrows), 0.0);
+    std::vector<double> newObj(static_cast<size_t>(newOriginalCols + this->nrows), 0.0);
 
-    newCsrOffs.reserve((size_t)this->nrows + 1);
+    newCsrOffs.reserve(static_cast<size_t>(this->nrows) + 1);
     newCsrOffs.push_back(0);
 
     for (int newCol = 0; newCol < newOriginalCols; ++newCol)
     {
-        newObj[(size_t)newCol] = oldCosts[(size_t)newToOld[(size_t)newCol]];
+        newObj[static_cast<size_t>(newCol)] = oldCosts[static_cast<size_t>(newToOld[static_cast<size_t>(newCol)])];
     }
 
     for (int i = 0; i < this->nrows; ++i)
     {
-        const int begin = (*this->hCsrMatOffs)[(size_t)i];
-        const int end = (*this->hCsrMatOffs)[(size_t)i + 1];
+        const int begin = this->hCsrMatOffs[static_cast<size_t>(i)];
+        const int end = this->hCsrMatOffs[static_cast<size_t>(i) + 1];
         for (int k = begin; k < end; ++k)
         {
-            const int oldCol = (*this->hCsrMatInds)[(size_t)k];
-            const double val = (*this->hCsrMatVals)[(size_t)k];
+            const int oldCol = this->hCsrMatInds[static_cast<size_t>(k)];
+            const double val = this->hCsrMatVals[static_cast<size_t>(k)];
             if (oldCol >= 0 && oldCol < this->ncolsOriginal)
             {
-                const int mapped = oldToNew[(size_t)oldCol];
+                const int mapped = oldToNew[static_cast<size_t>(oldCol)];
                 if (mapped >= 0)
                 {
                     newCsrInds.push_back(mapped);
@@ -301,79 +266,77 @@ void SyphaNodeSparse::rebuildCsrAfterRemoval(
                 newCsrVals.push_back(val);
             }
         }
-        newCsrOffs.push_back((int)newCsrVals.size());
+        newCsrOffs.push_back(static_cast<int>(newCsrVals.size()));
     }
 
-    free(this->hObjDns);
-    this->hObjDns = (double *)calloc((size_t)(newOriginalCols + this->nrows), sizeof(double));
-    memcpy(this->hObjDns, newObj.data(), sizeof(double) * (size_t)(newOriginalCols + this->nrows));
+    this->hObjDns.assign(newObj.begin(), newObj.end());
 
-    *this->hCsrMatInds = newCsrInds;
-    *this->hCsrMatOffs = newCsrOffs;
-    *this->hCsrMatVals = newCsrVals;
-    *this->hActiveToInputCols = newActiveToInput;
+    this->hCsrMatInds = newCsrInds;
+    this->hCsrMatOffs = newCsrOffs;
+    this->hCsrMatVals = newCsrVals;
+    this->hActiveToInputCols = newActiveToInput;
 
     this->ncolsOriginal = newOriginalCols;
     this->ncols = newOriginalCols + this->nrows;
-    this->nnz = (int)newCsrVals.size();
+    this->nnz = static_cast<int>(newCsrVals.size());
 }
 
 SyphaStatus SyphaNodeSparse::reduceByIncumbent(double incumbentUpperBound)
 {
-    if (this->nrows <= 0 || this->ncolsOriginal <= 0 || !this->hObjDns ||
-        !this->hCsrMatInds || !this->hCsrMatOffs || !this->hCsrMatVals)
+    if (this->nrows <= 0 || this->ncolsOriginal <= 0 || this->hObjDns.empty() ||
+        this->hCsrMatInds.empty() || this->hCsrMatOffs.empty() || this->hCsrMatVals.empty())
     {
-        return CODE_SUCCESFULL;
+        return CODE_SUCCESSFUL;
     }
     if (!std::isfinite(incumbentUpperBound))
     {
-        return CODE_SUCCESFULL;
+        return CODE_SUCCESSFUL;
     }
 
     initActiveColTracking();
 
     std::vector<int> newActiveToInput;
     std::vector<int> newToOld;
-    newActiveToInput.reserve((size_t)this->ncolsOriginal);
-    newToOld.reserve((size_t)this->ncolsOriginal);
-    std::vector<int> oldToNew((size_t)this->ncolsOriginal, -1);
+    newActiveToInput.reserve(static_cast<size_t>(this->ncolsOriginal));
+    newToOld.reserve(static_cast<size_t>(this->ncolsOriginal));
+    std::vector<int> oldToNew(static_cast<size_t>(this->ncolsOriginal), -1);
     int removed = 0;
 
     for (int oldCol = 0; oldCol < this->ncolsOriginal; ++oldCol)
     {
-        if (this->hObjDns[oldCol] + this->env->pxTolerance >= incumbentUpperBound)
+        if (this->hObjDns[oldCol] + this->env->getPxTolerance() >= incumbentUpperBound)
         {
             ++removed;
             continue;
         }
-        const int newCol = (int)newActiveToInput.size();
-        oldToNew[(size_t)oldCol] = newCol;
-        newActiveToInput.push_back((*this->hActiveToInputCols)[(size_t)oldCol]);
+        const int newCol = static_cast<int>(newActiveToInput.size());
+        oldToNew[static_cast<size_t>(oldCol)] = newCol;
+        newActiveToInput.push_back(this->hActiveToInputCols[static_cast<size_t>(oldCol)]);
         newToOld.push_back(oldCol);
     }
 
     if (removed == 0)
     {
-        return CODE_SUCCESFULL;
+        return CODE_SUCCESSFUL;
     }
     if (newActiveToInput.empty())
     {
         this->env->getLogger()->log(LOG_INFO, "Preprocessing removed all columns; keeping original model");
-        return CODE_SUCCESFULL;
+        return CODE_SUCCESSFUL;
     }
 
-    std::vector<double> oldCosts(this->hObjDns, this->hObjDns + this->ncolsOriginal);
+    std::vector<double> oldCosts(this->hObjDns.begin(), this->hObjDns.begin() + this->ncolsOriginal);
     rebuildCsrAfterRemoval(oldToNew, newToOld, newActiveToInput, oldCosts.data());
 
-    return CODE_SUCCESFULL;
+    return CODE_SUCCESSFUL;
 }
 
 SyphaStatus SyphaNodeSparse::applyDominancePreprocessing()
 {
-    if (this->nrows <= 0 || this->ncolsOriginal <= 0 || !this->hObjDns ||
-        !this->hCsrMatInds || !this->hCsrMatOffs || !this->hCsrMatVals)
+    if (this->nrows <= 0 || this->ncolsOriginal <= 0 || this->hObjDns.empty() ||
+        this->hCsrMatInds.empty() || this->hCsrMatOffs.empty() || this->hCsrMatVals.empty())
     {
-        return CODE_SUCCESFULL;
+        return CODE_SUCCESSFUL;
     }
 
     initActiveColTracking();
@@ -381,77 +344,77 @@ SyphaStatus SyphaNodeSparse::applyDominancePreprocessing()
     ColumnPreprocessContext ctx;
     ctx.nrows = this->nrows;
     ctx.ncols = this->ncolsOriginal;
-    ctx.rowsByColumn.assign((size_t)ctx.ncols, std::vector<int>());
-    ctx.costs.assign(this->hObjDns, this->hObjDns + this->ncolsOriginal);
-    ctx.active.assign((size_t)ctx.ncols, 1);
-    if (this->env->preprocessTimeLimitSeconds > 0.0)
+    ctx.rowsByColumn.assign(static_cast<size_t>(ctx.ncols), std::vector<int>());
+    ctx.costs.assign(this->hObjDns.begin(), this->hObjDns.begin() + this->ncolsOriginal);
+    ctx.active.assign(static_cast<size_t>(ctx.ncols), 1);
+    if (this->env->getPreprocessTimeLimitSeconds() > 0.0)
     {
         ctx.deadline = std::chrono::steady_clock::now() +
                        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                           std::chrono::duration<double>(this->env->preprocessTimeLimitSeconds));
+                           std::chrono::duration<double>(this->env->getPreprocessTimeLimitSeconds()));
     }
 
     for (int i = 0; i < this->nrows; ++i)
     {
-        const int begin = (*this->hCsrMatOffs)[(size_t)i];
-        const int end = (*this->hCsrMatOffs)[(size_t)i + 1];
+        const int begin = this->hCsrMatOffs[static_cast<size_t>(i)];
+        const int end = this->hCsrMatOffs[static_cast<size_t>(i) + 1];
         for (int k = begin; k < end; ++k)
         {
-            const int col = (*this->hCsrMatInds)[(size_t)k];
-            const double val = (*this->hCsrMatVals)[(size_t)k];
-            if (col >= 0 && col < this->ncolsOriginal && val > this->env->pxTolerance)
+            const int col = this->hCsrMatInds[static_cast<size_t>(k)];
+            const double val = this->hCsrMatVals[static_cast<size_t>(k)];
+            if (col >= 0 && col < this->ncolsOriginal && val > this->env->getPxTolerance())
             {
-                ctx.rowsByColumn[(size_t)col].push_back(i);
+                ctx.rowsByColumn[static_cast<size_t>(col)].push_back(i);
             }
         }
     }
 
-    std::vector<std::unique_ptr<IColumnPreprocessRule>> rules = makeColumnPreprocessRules(this->env->preprocessColumnStrategies);
+    std::vector<std::unique_ptr<IColumnPreprocessRule>> rules = makeColumnPreprocessRules(this->env->getPreprocessColumnStrategies());
     int removedByRules = 0;
     for (const std::unique_ptr<IColumnPreprocessRule> &rule : rules)
     {
-        removedByRules += rule->apply(ctx, this->env->pxTolerance);
+        removedByRules += rule->apply(ctx, this->env->getPxTolerance());
     }
 
     if (removedByRules <= 0)
     {
-        return CODE_SUCCESFULL;
+        return CODE_SUCCESSFUL;
     }
 
     std::vector<int> newActiveToInput;
     std::vector<int> newToOld;
-    newActiveToInput.reserve((size_t)ctx.ncols);
-    newToOld.reserve((size_t)ctx.ncols);
-    std::vector<int> oldToNew((size_t)ctx.ncols, -1);
+    newActiveToInput.reserve(static_cast<size_t>(ctx.ncols));
+    newToOld.reserve(static_cast<size_t>(ctx.ncols));
+    std::vector<int> oldToNew(static_cast<size_t>(ctx.ncols), -1);
     for (int oldCol = 0; oldCol < ctx.ncols; ++oldCol)
     {
-        if (!ctx.active[(size_t)oldCol])
+        if (!ctx.active[static_cast<size_t>(oldCol)])
         {
             continue;
         }
-        const int newCol = (int)newActiveToInput.size();
-        oldToNew[(size_t)oldCol] = newCol;
-        newActiveToInput.push_back((*this->hActiveToInputCols)[(size_t)oldCol]);
+        const int newCol = static_cast<int>(newActiveToInput.size());
+        oldToNew[static_cast<size_t>(oldCol)] = newCol;
+        newActiveToInput.push_back(this->hActiveToInputCols[static_cast<size_t>(oldCol)]);
         newToOld.push_back(oldCol);
     }
 
     if (newActiveToInput.empty())
     {
         this->env->getLogger()->log(LOG_INFO, "Dominance rules removed all columns; keeping original model");
-        return CODE_SUCCESFULL;
+        return CODE_SUCCESSFUL;
     }
 
     rebuildCsrAfterRemoval(oldToNew, newToOld, newActiveToInput, ctx.costs.data());
 
-    return CODE_SUCCESFULL;
+    return CODE_SUCCESSFUL;
 }
 
 SyphaStatus SyphaNodeSparse::applyCostDrivenReduction()
 {
-    if (this->nrows <= 0 || this->ncolsOriginal <= 0 || !this->hObjDns ||
-        !this->hCsrMatInds || !this->hCsrMatOffs || !this->hCsrMatVals)
+    if (this->nrows <= 0 || this->ncolsOriginal <= 0 || this->hObjDns.empty() ||
+        this->hCsrMatInds.empty() || this->hCsrMatOffs.empty() || this->hCsrMatVals.empty())
     {
-        return CODE_SUCCESFULL;
+        return CODE_SUCCESSFUL;
     }
 
     initActiveColTracking();
@@ -459,27 +422,27 @@ SyphaStatus SyphaNodeSparse::applyCostDrivenReduction()
     ColumnPreprocessContext ctx;
     ctx.nrows = this->nrows;
     ctx.ncols = this->ncolsOriginal;
-    ctx.rowsByColumn.assign((size_t)ctx.ncols, std::vector<int>());
-    ctx.costs.assign(this->hObjDns, this->hObjDns + this->ncolsOriginal);
-    ctx.active.assign((size_t)ctx.ncols, 1);
-    if (this->env->preprocessTimeLimitSeconds > 0.0)
+    ctx.rowsByColumn.assign(static_cast<size_t>(ctx.ncols), std::vector<int>());
+    ctx.costs.assign(this->hObjDns.begin(), this->hObjDns.begin() + this->ncolsOriginal);
+    ctx.active.assign(static_cast<size_t>(ctx.ncols), 1);
+    if (this->env->getPreprocessTimeLimitSeconds() > 0.0)
     {
         ctx.deadline = std::chrono::steady_clock::now() +
                        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                           std::chrono::duration<double>(this->env->preprocessTimeLimitSeconds));
+                           std::chrono::duration<double>(this->env->getPreprocessTimeLimitSeconds()));
     }
 
     for (int i = 0; i < this->nrows; ++i)
     {
-        const int begin = (*this->hCsrMatOffs)[(size_t)i];
-        const int end = (*this->hCsrMatOffs)[(size_t)i + 1];
+        const int begin = this->hCsrMatOffs[static_cast<size_t>(i)];
+        const int end = this->hCsrMatOffs[static_cast<size_t>(i) + 1];
         for (int k = begin; k < end; ++k)
         {
-            const int col = (*this->hCsrMatInds)[(size_t)k];
-            const double val = (*this->hCsrMatVals)[(size_t)k];
-            if (col >= 0 && col < this->ncolsOriginal && val > this->env->pxTolerance)
+            const int col = this->hCsrMatInds[static_cast<size_t>(k)];
+            const double val = this->hCsrMatVals[static_cast<size_t>(k)];
+            if (col >= 0 && col < this->ncolsOriginal && val > this->env->getPxTolerance())
             {
-                ctx.rowsByColumn[(size_t)col].push_back(i);
+                ctx.rowsByColumn[static_cast<size_t>(col)].push_back(i);
             }
         }
     }
@@ -488,40 +451,40 @@ SyphaStatus SyphaNodeSparse::applyCostDrivenReduction()
     int removedByRules = 0;
     for (const std::unique_ptr<IColumnPreprocessRule> &rule : rules)
     {
-        removedByRules += rule->apply(ctx, this->env->pxTolerance);
+        removedByRules += rule->apply(ctx, this->env->getPxTolerance());
     }
 
     if (removedByRules <= 0)
     {
-        return CODE_SUCCESFULL;
+        return CODE_SUCCESSFUL;
     }
 
     std::vector<int> newActiveToInput;
     std::vector<int> newToOld;
-    newActiveToInput.reserve((size_t)ctx.ncols);
-    newToOld.reserve((size_t)ctx.ncols);
-    std::vector<int> oldToNew((size_t)ctx.ncols, -1);
+    newActiveToInput.reserve(static_cast<size_t>(ctx.ncols));
+    newToOld.reserve(static_cast<size_t>(ctx.ncols));
+    std::vector<int> oldToNew(static_cast<size_t>(ctx.ncols), -1);
     for (int oldCol = 0; oldCol < ctx.ncols; ++oldCol)
     {
-        if (!ctx.active[(size_t)oldCol])
+        if (!ctx.active[static_cast<size_t>(oldCol)])
         {
             continue;
         }
-        const int newCol = (int)newActiveToInput.size();
-        oldToNew[(size_t)oldCol] = newCol;
-        newActiveToInput.push_back((*this->hActiveToInputCols)[(size_t)oldCol]);
+        const int newCol = static_cast<int>(newActiveToInput.size());
+        oldToNew[static_cast<size_t>(oldCol)] = newCol;
+        newActiveToInput.push_back(this->hActiveToInputCols[static_cast<size_t>(oldCol)]);
         newToOld.push_back(oldCol);
     }
 
     if (newActiveToInput.empty())
     {
         this->env->getLogger()->log(LOG_INFO, "Cost-driven replacement removed all columns; keeping original model");
-        return CODE_SUCCESFULL;
+        return CODE_SUCCESSFUL;
     }
 
     rebuildCsrAfterRemoval(oldToNew, newToOld, newActiveToInput, ctx.costs.data());
 
-    return CODE_SUCCESFULL;
+    return CODE_SUCCESSFUL;
 }
 
 SyphaStatus SyphaNodeSparse::releaseModelOnDevice()
@@ -529,73 +492,73 @@ SyphaStatus SyphaNodeSparse::releaseModelOnDevice()
     if (this->dCsrMatInds)
     {
         checkCudaErrors(cudaFree(this->dCsrMatInds));
-        this->dCsrMatInds = NULL;
+        this->dCsrMatInds = nullptr;
     }
     if (this->dCsrMatOffs)
     {
         checkCudaErrors(cudaFree(this->dCsrMatOffs));
-        this->dCsrMatOffs = NULL;
+        this->dCsrMatOffs = nullptr;
     }
     if (this->dCsrMatVals)
     {
         checkCudaErrors(cudaFree(this->dCsrMatVals));
-        this->dCsrMatVals = NULL;
+        this->dCsrMatVals = nullptr;
     }
 
     if (this->dCsrMatTransInds)
     {
         checkCudaErrors(cudaFree(this->dCsrMatTransInds));
-        this->dCsrMatTransInds = NULL;
+        this->dCsrMatTransInds = nullptr;
     }
     if (this->dCsrMatTransOffs)
     {
         checkCudaErrors(cudaFree(this->dCsrMatTransOffs));
-        this->dCsrMatTransOffs = NULL;
+        this->dCsrMatTransOffs = nullptr;
     }
     if (this->dCsrMatTransVals)
     {
         checkCudaErrors(cudaFree(this->dCsrMatTransVals));
-        this->dCsrMatTransVals = NULL;
+        this->dCsrMatTransVals = nullptr;
     }
 
     if (this->dObjDns)
     {
         checkCudaErrors(cudaFree(this->dObjDns));
-        this->dObjDns = NULL;
+        this->dObjDns = nullptr;
     }
     if (this->dRhsDns)
     {
         checkCudaErrors(cudaFree(this->dRhsDns));
-        this->dRhsDns = NULL;
+        this->dRhsDns = nullptr;
     }
 
     if (this->matDescr)
     {
         checkCudaErrors(cusparseDestroySpMat(this->matDescr));
-        this->matDescr = NULL;
+        this->matDescr = nullptr;
     }
     if (this->matTransDescr)
     {
         checkCudaErrors(cusparseDestroySpMat(this->matTransDescr));
-        this->matTransDescr = NULL;
+        this->matTransDescr = nullptr;
     }
     if (this->objDescr)
     {
         checkCudaErrors(cusparseDestroyDnVec(this->objDescr));
-        this->objDescr = NULL;
+        this->objDescr = nullptr;
     }
     if (this->rhsDescr)
     {
         checkCudaErrors(cusparseDestroyDnVec(this->rhsDescr));
-        this->rhsDescr = NULL;
+        this->rhsDescr = nullptr;
     }
 
-    return CODE_SUCCESFULL;
+    return CODE_SUCCESSFUL;
 }
 
 SyphaStatus SyphaNodeSparse::setInitValues()
 {
-    return CODE_SUCCESFULL;
+    return CODE_SUCCESSFUL;
 }
 
 SyphaStatus SyphaNodeSparse::setUpCuda()
@@ -614,5 +577,5 @@ SyphaStatus SyphaNodeSparse::setUpCuda()
     checkCudaErrors(cusolverDnSetStream(this->cusolverDnHandle, this->cudaStream));
     checkCudaErrors(cusolverSpSetStream(this->cusolverSpHandle, this->cudaStream));
 
-    return CODE_SUCCESFULL;
+    return CODE_SUCCESSFUL;
 }
