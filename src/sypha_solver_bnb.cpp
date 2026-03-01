@@ -249,6 +249,27 @@ std::vector<int> collect_fractional_candidates(const std::vector<double> &x, int
     return candidates;
 }
 
+bool has_integer_objective(const double *obj, int ncolsOriginal, double tol)
+{
+    for (int j = 0; j < ncolsOriginal; ++j)
+    {
+        const double v = obj[j];
+        const double nearest = floor(v + 0.5);
+        if (fabs(v - nearest) > tol)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+double tighten_dual_bound(double bound, double tol)
+{
+    if (!std::isfinite(bound))
+        return bound;
+    return ceil(bound - tol);
+}
+
 double compute_mip_gap(double incumbent, double dualBound)
 {
     if (!std::isfinite(incumbent) || !std::isfinite(dualBound))

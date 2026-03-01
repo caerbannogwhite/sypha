@@ -51,6 +51,8 @@ bool append_decision_if_consistent(const BranchNodeState &parent, int var, int v
 bool is_binary_integral_solution(const std::vector<double> &x, int ncolsOriginal, double tol);
 std::vector<int> collect_fractional_candidates(const std::vector<double> &x, int ncolsOriginal, double tol);
 double compute_mip_gap(double incumbent, double dualBound);
+bool has_integer_objective(const double *obj, int ncolsOriginal, double tol);
+double tighten_dual_bound(double bound, double tol);
 void build_branch_model(const BaseRelaxationModel &base,
                         const BranchNodeState &branchNode,
                         std::vector<int> *csrInds,

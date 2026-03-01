@@ -213,6 +213,12 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     const int heuristicFrequency = node.env->bnbHeuristicEveryNNodes > 0 ? node.env->bnbHeuristicEveryNNodes : 10;
     const double integralityTol = node.env->bnbIntegralityTol;
 
+    const bool objIsIntegral = has_integer_objective(node.hObjDns, node.ncolsOriginal, integralityTol);
+    if (objIsIntegral)
+    {
+        log->log(LOG_INFO, "Objective coefficients are integral; enabling dual bound tightening");
+    }
+
     double bestIntegerObj = std::numeric_limits<double>::infinity();
     // Stored in input-original column space (size = ncolsInputOriginal).
     std::vector<double> bestIntegerSolution;
@@ -344,7 +350,10 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             (presolveResult.dualObj <= presolveResult.primalObj + node.env->pxTolerance);
         if ((presolveResult.terminationReason == SOLVER_TERM_CONVERGED) && dualBoundConsistent)
         {
-            globalRelaxLowerBound = std::min(globalRelaxLowerBound, presolveResult.dualObj);
+            double rootDual = presolveResult.dualObj;
+            if (objIsIntegral)
+                rootDual = tighten_dual_bound(rootDual, integralityTol);
+            globalRelaxLowerBound = std::min(globalRelaxLowerBound, rootDual);
         }
     }
     else
@@ -636,7 +645,9 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             (result.status == CODE_SUCCESFULL) &&
             (result.terminationReason == SOLVER_TERM_CONVERGED) &&
             dualBoundConsistent;
-        const double nodeDualBound = (boundIsReliableForPruning) ? result.dualObj : branchNode.parentDualBound;
+        double nodeDualBound = (boundIsReliableForPruning) ? result.dualObj : branchNode.parentDualBound;
+        if (objIsIntegral && boundIsReliableForPruning && std::isfinite(nodeDualBound))
+            nodeDualBound = tighten_dual_bound(nodeDualBound, integralityTol);
 
         const bool dualImproved = boundIsReliableForPruning &&
             (nodeDualBound > branchNode.parentDualBound + node.env->pxTolerance);
