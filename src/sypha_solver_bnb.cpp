@@ -1,4 +1,5 @@
 #include "sypha_solver_bnb.h"
+#include "sypha_solver_cuts.h"
 
 #include <algorithm>
 #include <cmath>
@@ -197,6 +198,13 @@ bool remap_branch_node(BranchNodeState &branchNode, const std::vector<int> &oldT
         newDecisions.push_back({newVar, d.fixValue});
     }
     branchNode.decisions = std::move(newDecisions);
+
+    // Remap node-level cuts
+    for (CutConstraint &cut : branchNode.cuts)
+    {
+        remap_cut_constraint(cut, oldToNew);
+    }
+
     return true;
 }
 
@@ -297,19 +305,29 @@ void build_branch_model(const BaseRelaxationModel &base,
     *obj = base.obj;
     *rhs = base.rhs;
 
-    const int extraRows = static_cast<int>(branchNode.decisions.size());
+    const int nBranch = static_cast<int>(branchNode.decisions.size());
+    const int nCuts = static_cast<int>(branchNode.cuts.size());
+    const int extraRows = nBranch + nCuts;
     if (extraRows == 0)
     {
         return;
     }
 
-    csrInds->reserve(static_cast<size_t>(base.nnz + 2 * extraRows));
-    csrVals->reserve(static_cast<size_t>(base.nnz + 2 * extraRows));
+    // Estimate NNZ for node-level cuts (variable-length rows)
+    int cutNnz = 0;
+    for (const CutConstraint &c : branchNode.cuts)
+    {
+        cutNnz += static_cast<int>(c.indices.size()) + 1; // +1 for slack
+    }
+
+    csrInds->reserve(static_cast<size_t>(base.nnz + 2 * nBranch + cutNnz));
+    csrVals->reserve(static_cast<size_t>(base.nnz + 2 * nBranch + cutNnz));
     rhs->reserve(static_cast<size_t>(base.nrows + extraRows));
     obj->reserve(static_cast<size_t>(base.ncols + extraRows));
     csrOffs->reserve(static_cast<size_t>(base.nrows + extraRows + 1));
 
-    for (int row = 0; row < extraRows; ++row)
+    // Append branching constraint rows
+    for (int row = 0; row < nBranch; ++row)
     {
         const BranchDecision &d = branchNode.decisions[static_cast<size_t>(row)];
         const int slackCol = base.ncols + row;
@@ -322,6 +340,27 @@ void build_branch_model(const BaseRelaxationModel &base,
 
         csrOffs->push_back(csrOffs->back() + 2);
         rhs->push_back(static_cast<double>(d.fixValue));
+        obj->push_back(0.0);
+    }
+
+    // Append node-level cut rows
+    for (int ci = 0; ci < nCuts; ++ci)
+    {
+        const CutConstraint &cut = branchNode.cuts[static_cast<size_t>(ci)];
+        const int slackCol = base.ncols + nBranch + ci;
+
+        for (size_t k = 0; k < cut.indices.size(); ++k)
+        {
+            csrInds->push_back(cut.indices[k]);
+            csrVals->push_back(cut.values[k]);
+        }
+
+        csrInds->push_back(slackCol);
+        csrVals->push_back(-1.0);
+
+        csrOffs->push_back(csrOffs->back() +
+                           static_cast<int>(cut.indices.size()) + 1);
+        rhs->push_back(cut.rhs);
         obj->push_back(0.0);
     }
 }

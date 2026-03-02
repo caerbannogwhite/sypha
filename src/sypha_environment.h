@@ -58,6 +58,9 @@ private:
     int bnbGapStagnationWindow;
     bool bnbDisable;
     bool bnbAutoFallbackLp;
+    bool bnbCutsEnabled;
+    int bnbCutRoundsRoot;
+    int bnbMaxCutsPerRound;
     bool showSolution;
     std::string preprocessColumnStrategies;
     double preprocessTimeLimitSeconds;
@@ -109,6 +112,9 @@ public:
     int getBnbGapStagnationWindow() const;
     bool getBnbDisable() const;
     bool getBnbAutoFallbackLp() const;
+    bool getBnbCutsEnabled() const;
+    int getBnbCutRoundsRoot() const;
+    int getBnbMaxCutsPerRound() const;
 
     const std::string &getPreprocessColumnStrategies() const;
     double getPreprocessTimeLimitSeconds() const;

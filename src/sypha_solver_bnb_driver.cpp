@@ -1,6 +1,7 @@
 #include "sypha_solver_sparse.h"
 #include "sypha_solver.h"
 #include "sypha_solver_bnb.h"
+#include "sypha_solver_cuts.h"
 #include "sypha_solver_heuristics.h"
 #include "sypha_preprocessor.h"
 #include "sypha_node_sparse.h"
@@ -385,6 +386,153 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     BaseRelaxationModel base;
     buildBaseModel(&base);
 
+    // ====================================================================
+    // Phase 6.5: Root cut separation rounds
+    // ====================================================================
+    if (node.env->getBnbCutsEnabled() && node.env->getBnbCutRoundsRoot() > 0)
+    {
+        auto separators = makeCutSeparators();
+        const int maxRounds = node.env->getBnbCutRoundsRoot();
+        const int maxCutsPerRound = node.env->getBnbMaxCutsPerRound();
+        int totalCutsAdded = 0;
+        int cutRound = 0;
+
+        for (cutRound = 0; cutRound < maxRounds; ++cutRound)
+        {
+            // Refresh node from current base model (which may include prior cuts)
+            node.nrows = base.nrows;
+            node.ncols = base.ncols;
+            node.ncolsOriginal = base.ncolsOriginal;
+            node.nnz = base.nnz;
+            node.hCsrMatInds = base.csrInds;
+            node.hCsrMatOffs = base.csrOffs;
+            node.hCsrMatVals = base.csrVals;
+            node.hObjDns = base.obj;
+            node.hRhsDns = base.rhs;
+
+            if (node.copyModelOnDevice() != CODE_SUCCESSFUL)
+            {
+                return CODE_GENERIC_ERROR;
+            }
+
+            // Solve LP relaxation on the current (cut-strengthened) model
+            SolverExecutionConfig cutConfig;
+            cutConfig.maxIterations = node.env->getMehrotraMaxIter();
+            cutConfig.gapStagnation.enabled = false;
+            cutConfig.bnbNodeOrdinal = 0;
+            cutConfig.denseSelectionLogEveryNodes = 10;
+
+            SolverExecutionResult cutResult;
+            const SyphaStatus cutStatus = solver_sparse_mehrotra_run(
+                node, cutConfig, &cutResult);
+            if (cutStatus != CODE_SUCCESSFUL || cutResult.status != CODE_SUCCESSFUL)
+            {
+                log->log(LOG_INFO, "Cut round %d: LP solve failed, stopping cuts",
+                         cutRound + 1);
+                break;
+            }
+
+            // Update dual bound from cut-strengthened LP
+            if (cutResult.terminationReason == SOLVER_TERM_CONVERGED &&
+                std::isfinite(cutResult.dualObj) &&
+                std::isfinite(cutResult.primalObj) &&
+                (cutResult.dualObj <= cutResult.primalObj + node.env->getPxTolerance()))
+            {
+                double cutDual = cutResult.dualObj;
+                if (objIsIntegral)
+                    cutDual = tighten_dual_bound(cutDual, integralityTol);
+                globalRelaxLowerBound = std::min(globalRelaxLowerBound, cutDual);
+            }
+
+            // Check if LP is already integral
+            if (static_cast<int>(cutResult.primalSolution.size()) >= base.ncolsOriginal &&
+                is_binary_integral_solution(cutResult.primalSolution, base.ncolsOriginal, integralityTol) &&
+                cutResult.primalObj < bestIntegerObj - node.env->getPxTolerance())
+            {
+                bestIntegerObj = cutResult.primalObj;
+                adoptIncumbentSolution(bestIntegerSolution, cutResult.primalSolution,
+                                       base.ncolsOriginal, ncolsInputOriginal, base.activeToOriginalCol);
+                incumbentSource = "cut_round_exact";
+                log->log(LOG_INFO, "Cut round %d: LP integral, incumbent %.12g",
+                         cutRound + 1, bestIntegerObj);
+                break;
+            }
+
+            // Run heuristics on cut-strengthened relaxation
+            BranchNodeState emptyBranch;
+            for (const auto &heuristic : heuristics)
+            {
+                IntegerHeuristicResult heuristicRes = heuristic->tryBuild(
+                    cutResult.primalSolution, cutResult.dualSolution,
+                    base, emptyBranch, integralityTol);
+                if (heuristicRes.feasible &&
+                    heuristicRes.objective < bestIntegerObj - node.env->getPxTolerance())
+                {
+                    bestIntegerObj = heuristicRes.objective;
+                    adoptIncumbentSolution(bestIntegerSolution, heuristicRes.solution,
+                                           base.ncolsOriginal, ncolsInputOriginal,
+                                           base.activeToOriginalCol);
+                    incumbentSource = std::string("cut_round_") + heuristicRes.name;
+                    log->log(LOG_INFO, "Cut round %d: heuristic incumbent %.12g",
+                             cutRound + 1, bestIntegerObj);
+                }
+            }
+
+            // Separate cuts
+            std::vector<CutConstraint> roundCuts;
+            for (const auto &sep : separators)
+            {
+                auto sepCuts = sep->separate(
+                    cutResult.primalSolution, cutResult.dualSolution,
+                    base, base.ncolsOriginal, integralityTol);
+                for (auto &c : sepCuts)
+                {
+                    if (static_cast<int>(roundCuts.size()) >= maxCutsPerRound)
+                        break;
+                    roundCuts.push_back(std::move(c));
+                }
+                if (static_cast<int>(roundCuts.size()) >= maxCutsPerRound)
+                    break;
+            }
+
+            if (roundCuts.empty())
+            {
+                log->log(LOG_INFO, "Cut round %d: no violated cuts found, stopping",
+                         cutRound + 1);
+                break;
+            }
+
+            // Add cuts to base model
+            append_cuts_to_base_model(base, roundCuts);
+            totalCutsAdded += static_cast<int>(roundCuts.size());
+            log->log(LOG_INFO, "Cut round %d: added %d cuts (total %d, model now %d rows x %d cols)",
+                     cutRound + 1, static_cast<int>(roundCuts.size()),
+                     totalCutsAdded, base.nrows, base.ncols);
+        }
+
+        if (totalCutsAdded > 0)
+        {
+            log->log(LOG_INFO, "Root cuts complete: %d cuts in %d rounds",
+                     totalCutsAdded, cutRound);
+
+            // Refresh node from final cut-strengthened base model
+            node.nrows = base.nrows;
+            node.ncols = base.ncols;
+            node.ncolsOriginal = base.ncolsOriginal;
+            node.nnz = base.nnz;
+            node.hCsrMatInds = base.csrInds;
+            node.hCsrMatOffs = base.csrOffs;
+            node.hCsrMatVals = base.csrVals;
+            node.hObjDns = base.obj;
+            node.hRhsDns = base.rhs;
+
+            if (node.copyModelOnDevice() != CODE_SUCCESSFUL)
+            {
+                return CODE_GENERIC_ERROR;
+            }
+        }
+    }
+
     // Pre-allocate IPM workspace for B&B reuse (avoids ~20 cudaMalloc/cudaFree per node).
     IpmWorkspace ipmWorkspace;
     {
@@ -563,9 +711,14 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         std::vector<double> workRhs;
         build_branch_model(base, branchNode, &workInds, &workOffs, &workVals, &workObj, &workRhs);
 
-        node.nrows = base.nrows + static_cast<int>(branchNode.decisions.size());
-        node.ncols = base.ncols + static_cast<int>(branchNode.decisions.size());
-        node.nnz = base.nnz + 2 * static_cast<int>(branchNode.decisions.size());
+        const int nBranch = static_cast<int>(branchNode.decisions.size());
+        const int nNodeCuts = static_cast<int>(branchNode.cuts.size());
+        int nodeCutNnz = 0;
+        for (const CutConstraint &c : branchNode.cuts)
+            nodeCutNnz += static_cast<int>(c.indices.size()) + 1;
+        node.nrows = base.nrows + nBranch + nNodeCuts;
+        node.ncols = base.ncols + nBranch + nNodeCuts;
+        node.nnz = base.nnz + 2 * nBranch + nodeCutNnz;
         node.ncolsOriginal = base.ncolsOriginal;
 
         node.hCsrMatInds = workInds;

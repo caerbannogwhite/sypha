@@ -12,9 +12,18 @@ struct BranchDecision
     int fixValue; // 0 => x_j <= 0, 1 => x_j >= 1
 };
 
+struct CutConstraint
+{
+    std::vector<int> indices;   // Column indices (active-column space, original vars only)
+    std::vector<double> values; // Coefficient values
+    double rhs = 0.0;          // RHS (standard form: sum(values[k]*x[indices[k]]) - slack = rhs)
+    std::string type;           // Cut origin tag for logging (e.g., "cg_dual_aggregated")
+};
+
 struct BranchNodeState
 {
     std::vector<BranchDecision> decisions;
+    std::vector<CutConstraint> cuts; // Node-local cutting planes (in addition to base model cuts)
     int depth = 0;
     double parentDualBound = -std::numeric_limits<double>::infinity();
 };

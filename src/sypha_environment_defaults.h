@@ -40,6 +40,9 @@ constexpr double kBnbHardTimeLimitSeconds = 0.0;
 constexpr int kBnbGapStagnationWindow = 50;
 constexpr bool kBnbDisable = false;
 constexpr bool kBnbAutoFallbackLp = true;
+constexpr bool kBnbCutsEnabled = true;
+constexpr int kBnbCutRoundsRoot = 5;
+constexpr int kBnbMaxCutsPerRound = 50;
 constexpr bool kShowSolution = false;
 constexpr double kPreprocessTimeLimitSeconds = 5.0;
 

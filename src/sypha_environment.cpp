@@ -82,6 +82,9 @@ SyphaStatus SyphaEnvironment::setDefaultParameters()
     this->bnbGapStagnationWindow = sypha_environment_defaults::kBnbGapStagnationWindow;
     this->bnbDisable = sypha_environment_defaults::kBnbDisable;
     this->bnbAutoFallbackLp = sypha_environment_defaults::kBnbAutoFallbackLp;
+    this->bnbCutsEnabled = sypha_environment_defaults::kBnbCutsEnabled;
+    this->bnbCutRoundsRoot = sypha_environment_defaults::kBnbCutRoundsRoot;
+    this->bnbMaxCutsPerRound = sypha_environment_defaults::kBnbMaxCutsPerRound;
     this->showSolution = sypha_environment_defaults::kShowSolution;
     this->preprocessColumnStrategies = sypha_environment_defaults::kPreprocessColumnStrategies();
     this->preprocessTimeLimitSeconds = sypha_environment_defaults::kPreprocessTimeLimitSeconds;
@@ -139,6 +142,9 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
             ("bnb-log-interval-sec", po::value<double>(&this->bnbLogIntervalSeconds)->default_value(sypha_environment_defaults::kBnbLogIntervalSeconds), "seconds between branch-and-bound progress logs (<=0 disables)")
             ("bnb-hard-time-limit-sec", po::value<double>(&this->bnbHardTimeLimitSeconds)->default_value(sypha_environment_defaults::kBnbHardTimeLimitSeconds), "hard time limit for branch-and-bound in seconds (<=0 disables)")
             ("bnb-gap-stagnation-window", po::value<int>(&this->bnbGapStagnationWindow)->default_value(sypha_environment_defaults::kBnbGapStagnationWindow), "reduce LP iterations when MIP gap stagnates for this many BnB nodes (<=0 disables)")
+            ("bnb-cuts", po::value<bool>(&this->bnbCutsEnabled)->default_value(sypha_environment_defaults::kBnbCutsEnabled), "enable cutting planes at root node")
+            ("bnb-cut-rounds-root", po::value<int>(&this->bnbCutRoundsRoot)->default_value(sypha_environment_defaults::kBnbCutRoundsRoot), "max cut separation rounds at root node")
+            ("bnb-max-cuts-per-round", po::value<int>(&this->bnbMaxCutsPerRound)->default_value(sypha_environment_defaults::kBnbMaxCutsPerRound), "max cuts added per separation round")
             ("preprocess-columns", po::value<std::string>(&this->preprocessColumnStrategies)->default_value(sypha_environment_defaults::kPreprocessColumnStrategies()), "comma-separated preprocessing rules: single_column_dominance,two_column_dominance,none")
             ("preprocess-time-limit-sec", po::value<double>(&this->preprocessTimeLimitSeconds)->default_value(sypha_environment_defaults::kPreprocessTimeLimitSeconds), "time limit in seconds for column dominance preprocessing (<=0 disables)");
 
@@ -214,6 +220,9 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         logger_->log(LOG_DEBUG, "Preprocess time limit: %.1f s", this->preprocessTimeLimitSeconds);
         logger_->log(LOG_DEBUG, "BnB disabled: %s", this->bnbDisable ? "true" : "false");
         logger_->log(LOG_DEBUG, "BnB auto fallback LP: %s", this->bnbAutoFallbackLp ? "true" : "false");
+        logger_->log(LOG_DEBUG, "BnB cuts enabled: %s", this->bnbCutsEnabled ? "true" : "false");
+        logger_->log(LOG_DEBUG, "BnB cut rounds (root): %d", this->bnbCutRoundsRoot);
+        logger_->log(LOG_DEBUG, "BnB max cuts per round: %d", this->bnbMaxCutsPerRound);
         this->denseGpuMemoryFractionThreshold = std::max(0.0, this->denseGpuMemoryFractionThreshold);
     }
     catch (std::exception &e)
@@ -299,6 +308,9 @@ double SyphaEnvironment::getBnbHardTimeLimitSeconds() const { return this->bnbHa
 int SyphaEnvironment::getBnbGapStagnationWindow() const { return this->bnbGapStagnationWindow; }
 bool SyphaEnvironment::getBnbDisable() const { return this->bnbDisable; }
 bool SyphaEnvironment::getBnbAutoFallbackLp() const { return this->bnbAutoFallbackLp; }
+bool SyphaEnvironment::getBnbCutsEnabled() const { return this->bnbCutsEnabled; }
+int SyphaEnvironment::getBnbCutRoundsRoot() const { return this->bnbCutRoundsRoot; }
+int SyphaEnvironment::getBnbMaxCutsPerRound() const { return this->bnbMaxCutsPerRound; }
 
 const std::string &SyphaEnvironment::getPreprocessColumnStrategies() const { return this->preprocessColumnStrategies; }
 double SyphaEnvironment::getPreprocessTimeLimitSeconds() const { return this->preprocessTimeLimitSeconds; }
