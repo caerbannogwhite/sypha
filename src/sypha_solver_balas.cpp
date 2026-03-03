@@ -45,7 +45,8 @@ BalasBranchResult balas_branch_generate(
     const BaseRelaxationModel &base,
     int ncolsOriginal,
     int maxBranches,
-    double integralityTol)
+    double integralityTol,
+    bool forceBalas)
 {
     BalasBranchResult result;
     result.useBR1 = false;
@@ -102,18 +103,26 @@ BalasBranchResult balas_branch_generate(
     const int p = static_cast<int>(result.sets.size());
     if (p >= 2)
     {
-        int totalVars = 0;
-        int singletonCount = 0;
-        for (const std::vector<int> &s : result.sets)
+        if (forceBalas)
         {
-            totalVars += static_cast<int>(s.size());
-            if (s.size() == 1)
-                ++singletonCount;
+            // Skip threshold checks; use BR1 if within branch limit
+            result.useBR1 = (p <= maxBranches);
         }
+        else
+        {
+            int totalVars = 0;
+            int singletonCount = 0;
+            for (const std::vector<int> &s : result.sets)
+            {
+                totalVars += static_cast<int>(s.size());
+                if (s.size() == 1)
+                    ++singletonCount;
+            }
 
-        result.useBR1 = (totalVars > static_cast<int>(p * std::log2(static_cast<double>(p)))) &&
-                         (singletonCount <= 1) &&
-                         (p <= maxBranches);
+            result.useBR1 = (totalVars > static_cast<int>(p * std::log2(static_cast<double>(p)))) &&
+                             (singletonCount <= 1) &&
+                             (p <= maxBranches);
+        }
     }
 
     return result;
@@ -160,8 +169,40 @@ std::vector<BranchNodeState> balas_br1_children(
         if (!consistent)
             continue;
 
+        // Collect variables fixed to 0 in this child for feasibility checks
+        std::vector<int> zeroFixedVars;
+        for (const BranchDecision &d : child.decisions)
+        {
+            if (d.fixValue == 0)
+                zeroFixedVars.push_back(d.varIndex);
+        }
+        std::sort(zeroFixedVars.begin(), zeroFixedVars.end());
+
         // Add cover cuts for each prior set R_k (k < i):
         // sum_{j in R_k} x_j >= 1
+        // Skip child entirely if any cover cut is unsatisfiable
+        // (all its variables are fixed to 0).
+        bool coverFeasible = true;
+        for (int k = 0; k < i; ++k)
+        {
+            bool hasUnfixed = false;
+            for (const int j : branchSets[static_cast<size_t>(k)])
+            {
+                if (!std::binary_search(zeroFixedVars.begin(), zeroFixedVars.end(), j))
+                {
+                    hasUnfixed = true;
+                    break;
+                }
+            }
+            if (!hasUnfixed)
+            {
+                coverFeasible = false;
+                break;
+            }
+        }
+        if (!coverFeasible)
+            continue;
+
         for (int k = 0; k < i; ++k)
         {
             CutConstraint cut;

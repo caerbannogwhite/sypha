@@ -67,6 +67,70 @@ static void pruneFrontier(
     }
 }
 
+// Check if a branch node is provably infeasible before enqueueing.
+// Returns true if the node should be discarded.
+static bool is_node_provably_infeasible(
+    const BranchNodeState &branchNode,
+    const BaseRelaxationModel &base)
+{
+    // Collect variables fixed to 0
+    std::vector<int> zeroFixed;
+    for (const BranchDecision &d : branchNode.decisions)
+    {
+        if (d.fixValue == 0)
+            zeroFixed.push_back(d.varIndex);
+    }
+    if (zeroFixed.empty())
+        return false;
+    std::sort(zeroFixed.begin(), zeroFixed.end());
+
+    // Check node-level cuts: sum_{j in cut} x_j >= rhs.
+    // If all variables in a cut are fixed to 0, it's infeasible.
+    for (const CutConstraint &cut : branchNode.cuts)
+    {
+        if (cut.rhs <= 0.0)
+            continue;
+        bool hasUnfixed = false;
+        for (const int j : cut.indices)
+        {
+            if (!std::binary_search(zeroFixed.begin(), zeroFixed.end(), j))
+            {
+                hasUnfixed = true;
+                break;
+            }
+        }
+        if (!hasUnfixed)
+            return true;
+    }
+
+    // Check base model cover rows: for each row with rhs > 0, if all
+    // original columns covering it are fixed to 0, it's infeasible.
+    for (int i = 0; i < base.nrows; ++i)
+    {
+        if (base.rhs[static_cast<size_t>(i)] <= 0.0)
+            continue;
+        bool hasUnfixed = false;
+        for (int k = base.csrOffs[static_cast<size_t>(i)];
+             k < base.csrOffs[static_cast<size_t>(i) + 1]; ++k)
+        {
+            const int col = base.csrInds[static_cast<size_t>(k)];
+            if (col < 0 || col >= base.ncolsOriginal)
+                continue;
+            if (base.csrVals[static_cast<size_t>(k)] <= 0.0)
+                continue;
+            if (!std::binary_search(zeroFixed.begin(), zeroFixed.end(), col))
+            {
+                hasUnfixed = true;
+                break;
+            }
+        }
+        if (!hasUnfixed)
+            return true;
+    }
+
+    return false;
+}
+
 // refreshNodeFromBase is defined as a lambda inside solver_sparse_branch_and_bound
 // (requires friend access to SyphaNodeSparse private members).
 
@@ -681,6 +745,13 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     int nodeAtLastGapImprovement = 0;
     bool iterationsReduced = false;
 
+    // Alternating stagnation response: cycles cuts -> aggressive branching -> cuts -> ...
+    // Phase 0 = next response is a mid-BnB cut round
+    // Phase 1 = next response is aggressive (forced) Balas branching
+    int stagnationResponsePhase = 0;
+    bool forceAggressiveBranching = false;
+    auto cutSeparators = makeCutSeparators();
+
     auto releaseBaseCopies = [&]() {
         if (d_baseInds)
             checkCudaErrors(cudaFree(d_baseInds));
@@ -856,6 +927,9 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                 releaseBaseCopies();
                 return CODE_GENERIC_ERROR;
             }
+            // Count infeasible nodes so the node limit can terminate the loop.
+            ++processedNodes;
+            totalLpIterations += result.iterations;
             continue;
         }
 
@@ -993,19 +1067,31 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             BalasBranchResult br = balas_branch_generate(
                 result.primalSolution, result.dualSolution, reducedCosts,
                 base, base.ncolsOriginal, node.env->getBnbBalasMaxBranches(),
-                integralityTol);
+                integralityTol, forceAggressiveBranching);
 
             if (br.useBR1)
             {
                 std::vector<BranchNodeState> children = balas_br1_children(
                     branchNode, br.sets, nodeDualBound, nodeDualBoundRaw);
 
+                int enqueuedChildren = 0;
                 for (auto &child : children)
                 {
-                    nodes.push_back(std::move(child));
-                    frontier.push_back(static_cast<int>(nodes.size()) - 1);
+                    if (!is_node_provably_infeasible(child, base))
+                    {
+                        nodes.push_back(std::move(child));
+                        frontier.push_back(static_cast<int>(nodes.size()) - 1);
+                        ++enqueuedChildren;
+                    }
                 }
-                usedBalas = true;
+                usedBalas = (enqueuedChildren > 0);
+
+                if (forceAggressiveBranching)
+                {
+                    log->log(LOG_INFO, "Aggressive Balas BR1: %d children enqueued from %d sets",
+                             enqueuedChildren, static_cast<int>(br.sets.size()));
+                    forceAggressiveBranching = false;
+                }
             }
         }
 
@@ -1019,7 +1105,8 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             }
 
             BranchNodeState childZero;
-            if (append_decision_if_consistent(branchNode, branchVar, 0, &childZero))
+            if (append_decision_if_consistent(branchNode, branchVar, 0, &childZero) &&
+                !is_node_provably_infeasible(childZero, base))
             {
                 childZero.parentDualBound = nodeDualBound;
                 childZero.parentDualBoundRaw = nodeDualBoundRaw;
@@ -1028,7 +1115,8 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             }
 
             BranchNodeState childOne;
-            if (append_decision_if_consistent(branchNode, branchVar, 1, &childOne))
+            if (append_decision_if_consistent(branchNode, branchVar, 1, &childOne) &&
+                !is_node_provably_infeasible(childOne, base))
             {
                 childOne.parentDualBound = nodeDualBound;
                 childOne.parentDualBoundRaw = nodeDualBoundRaw;
@@ -1037,7 +1125,8 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             }
         }
 
-        // Adaptive iteration control: check for MIP gap stagnation.
+        // Adaptive stagnation control: when MIP gap stagnates, alternate between
+        // mid-BnB cut rounds and aggressive Balas branching.
         if (gapStagnationWindow > 0 && std::isfinite(bestIntegerObj))
         {
             // Periodically recompute global dual bound for accurate gap tracking.
@@ -1066,11 +1155,84 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                 }
             }
 
-            if (!iterationsReduced && (processedNodes - nodeAtLastGapImprovement >= gapStagnationWindow))
+            if (processedNodes - nodeAtLastGapImprovement >= gapStagnationWindow)
             {
-                iterationsReduced = true;
-                log->log(LOG_INFO, "MIP gap stagnant for %d nodes, reducing LP iterations: %d -> %d",
-                         gapStagnationWindow, fullMaxIter, reducedMaxIter);
+                if (!iterationsReduced)
+                {
+                    iterationsReduced = true;
+                    log->log(LOG_INFO, "MIP gap stagnant for %d nodes, reducing LP iterations: %d -> %d",
+                             gapStagnationWindow, fullMaxIter, reducedMaxIter);
+                }
+
+                // Alternating stagnation response
+                if (stagnationResponsePhase == 0)
+                {
+                    // Phase 0: mid-BnB cut round
+                    if (node.env->getBnbCutsEnabled())
+                    {
+                        const int maxCutsPerRound = node.env->getBnbMaxCutsPerRound();
+                        std::vector<CutConstraint> roundCuts;
+                        for (const auto &sep : cutSeparators)
+                        {
+                            auto sepCuts = sep->separate(
+                                result.primalSolution, result.dualSolution,
+                                base, base.ncolsOriginal, integralityTol);
+                            for (auto &c : sepCuts)
+                            {
+                                if (static_cast<int>(roundCuts.size()) >= maxCutsPerRound)
+                                    break;
+                                roundCuts.push_back(std::move(c));
+                            }
+                            if (static_cast<int>(roundCuts.size()) >= maxCutsPerRound)
+                                break;
+                        }
+
+                        if (!roundCuts.empty())
+                        {
+                            const int nNewCuts = static_cast<int>(roundCuts.size());
+                            append_cuts_to_base_model(base, roundCuts);
+                            rootCutsAdded += nNewCuts;
+
+                            // Resize IPM workspace if the model grew beyond current capacity
+                            {
+                                const int maxBranchDecisions = base.ncolsOriginal;
+                                const int maxNcols = base.ncols + maxBranchDecisions;
+                                const int maxNrows = base.nrows + maxBranchDecisions;
+                                const int maxNnz = base.nnz + 2 * maxBranchDecisions;
+                                const int maxKktNrows = 2 * maxNcols + maxNrows;
+                                const int maxKktNnz = 2 * maxNnz + 3 * maxNcols;
+                                initializeIpmWorkspace(&ipmWorkspace, maxKktNrows, maxKktNnz, maxNcols);
+                            }
+
+                            if (refreshNodeFromBase(base, d_baseInds, d_baseOffs, d_baseVals) != CODE_SUCCESSFUL)
+                            {
+                                releaseIpmWorkspace(&ipmWorkspace);
+                                releaseBaseCopies();
+                                return CODE_GENERIC_ERROR;
+                            }
+
+                            log->log(LOG_INFO, "Stagnation response: added %d mid-BnB cuts (model now %d rows x %d cols)",
+                                     nNewCuts, base.nrows, base.ncols);
+                        }
+                        else
+                        {
+                            log->log(LOG_INFO, "Stagnation response: no violated cuts found, skipping cut phase");
+                        }
+                    }
+                    stagnationResponsePhase = 1;
+                }
+                else
+                {
+                    // Phase 1: force aggressive Balas branching on the next node
+                    if (node.env->getBnbBalasBranchingEnabled())
+                    {
+                        forceAggressiveBranching = true;
+                        log->log(LOG_INFO, "Stagnation response: enabling aggressive Balas branching");
+                    }
+                    stagnationResponsePhase = 0;
+                }
+
+                nodeAtLastGapImprovement = processedNodes;
             }
         }
     }

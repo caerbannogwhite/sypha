@@ -19,7 +19,8 @@ struct BalasBranchResult
     bool useBR1;                        // true if Algorithm 6 chose BR1
 };
 
-// BBG + Algorithm 6: generate branching sets and decide BR1 vs BR2
+// BBG + Algorithm 6: generate branching sets and decide BR1 vs BR2.
+// When forceBalas is true, use BR1 whenever p >= 2 (skip Algorithm 6 threshold).
 BalasBranchResult balas_branch_generate(
     const std::vector<double> &primalSolution,
     const std::vector<double> &dualSolution,
@@ -27,7 +28,8 @@ BalasBranchResult balas_branch_generate(
     const BaseRelaxationModel &base,
     int ncolsOriginal,
     int maxBranches,
-    double integralityTol);
+    double integralityTol,
+    bool forceBalas = false);
 
 // BR1: create p children with multi-variable fixings + cover cuts
 std::vector<BranchNodeState> balas_br1_children(
