@@ -85,6 +85,8 @@ SyphaStatus SyphaEnvironment::setDefaultParameters()
     this->bnbCutsEnabled = sypha_environment_defaults::kBnbCutsEnabled;
     this->bnbCutRoundsRoot = sypha_environment_defaults::kBnbCutRoundsRoot;
     this->bnbMaxCutsPerRound = sypha_environment_defaults::kBnbMaxCutsPerRound;
+    this->bnbBalasBranchingEnabled = sypha_environment_defaults::kBnbBalasBranchingEnabled;
+    this->bnbBalasMaxBranches = sypha_environment_defaults::kBnbBalasMaxBranches;
     this->showSolution = sypha_environment_defaults::kShowSolution;
     this->preprocessColumnStrategies = sypha_environment_defaults::kPreprocessColumnStrategies();
     this->preprocessTimeLimitSeconds = sypha_environment_defaults::kPreprocessTimeLimitSeconds;
@@ -145,6 +147,8 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
             ("bnb-cuts", po::value<bool>(&this->bnbCutsEnabled)->default_value(sypha_environment_defaults::kBnbCutsEnabled), "enable cutting planes at root node")
             ("bnb-cut-rounds-root", po::value<int>(&this->bnbCutRoundsRoot)->default_value(sypha_environment_defaults::kBnbCutRoundsRoot), "max cut separation rounds at root node")
             ("bnb-max-cuts-per-round", po::value<int>(&this->bnbMaxCutsPerRound)->default_value(sypha_environment_defaults::kBnbMaxCutsPerRound), "max cuts added per separation round")
+            ("bnb-balas-branching", po::value<bool>(&this->bnbBalasBranchingEnabled)->default_value(sypha_environment_defaults::kBnbBalasBranchingEnabled), "enable Balas multi-variable branching (BR1)")
+            ("bnb-balas-max-branches", po::value<int>(&this->bnbBalasMaxBranches)->default_value(sypha_environment_defaults::kBnbBalasMaxBranches), "max children for Balas BR1 branching")
             ("preprocess-columns", po::value<std::string>(&this->preprocessColumnStrategies)->default_value(sypha_environment_defaults::kPreprocessColumnStrategies()), "comma-separated preprocessing rules: single_column_dominance,two_column_dominance,none")
             ("preprocess-time-limit-sec", po::value<double>(&this->preprocessTimeLimitSeconds)->default_value(sypha_environment_defaults::kPreprocessTimeLimitSeconds), "time limit in seconds for column dominance preprocessing (<=0 disables)");
 
@@ -223,6 +227,8 @@ SyphaStatus SyphaEnvironment::readInputArguments(int argc, char *argv[])
         logger_->log(LOG_DEBUG, "BnB cuts enabled: %s", this->bnbCutsEnabled ? "true" : "false");
         logger_->log(LOG_DEBUG, "BnB cut rounds (root): %d", this->bnbCutRoundsRoot);
         logger_->log(LOG_DEBUG, "BnB max cuts per round: %d", this->bnbMaxCutsPerRound);
+        logger_->log(LOG_DEBUG, "BnB Balas branching: %s", this->bnbBalasBranchingEnabled ? "true" : "false");
+        logger_->log(LOG_DEBUG, "BnB Balas max branches: %d", this->bnbBalasMaxBranches);
         this->denseGpuMemoryFractionThreshold = std::max(0.0, this->denseGpuMemoryFractionThreshold);
     }
     catch (std::exception &e)
@@ -311,6 +317,8 @@ bool SyphaEnvironment::getBnbAutoFallbackLp() const { return this->bnbAutoFallba
 bool SyphaEnvironment::getBnbCutsEnabled() const { return this->bnbCutsEnabled; }
 int SyphaEnvironment::getBnbCutRoundsRoot() const { return this->bnbCutRoundsRoot; }
 int SyphaEnvironment::getBnbMaxCutsPerRound() const { return this->bnbMaxCutsPerRound; }
+bool SyphaEnvironment::getBnbBalasBranchingEnabled() const { return this->bnbBalasBranchingEnabled; }
+int SyphaEnvironment::getBnbBalasMaxBranches() const { return this->bnbBalasMaxBranches; }
 
 const std::string &SyphaEnvironment::getPreprocessColumnStrategies() const { return this->preprocessColumnStrategies; }
 double SyphaEnvironment::getPreprocessTimeLimitSeconds() const { return this->preprocessTimeLimitSeconds; }

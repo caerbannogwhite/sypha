@@ -1,5 +1,6 @@
 #include "sypha_solver_sparse.h"
 #include "sypha_solver.h"
+#include "sypha_solver_balas.h"
 #include "sypha_solver_bnb.h"
 #include "sypha_solver_cuts.h"
 #include "sypha_solver_heuristics.h"
@@ -983,28 +984,57 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             continue;
         }
 
-        const int branchVar = selector->select(result.primalSolution, base.obj, fractionalCandidates);
-        if (branchVar < 0)
+        bool usedBalas = false;
+        if (node.env->getBnbBalasBranchingEnabled())
         {
-            continue;
+            std::vector<double> reducedCosts = compute_reduced_costs(
+                base.obj, result.dualSolution, base, base.ncolsOriginal);
+
+            BalasBranchResult br = balas_branch_generate(
+                result.primalSolution, result.dualSolution, reducedCosts,
+                base, base.ncolsOriginal, node.env->getBnbBalasMaxBranches(),
+                integralityTol);
+
+            if (br.useBR1)
+            {
+                std::vector<BranchNodeState> children = balas_br1_children(
+                    branchNode, br.sets, nodeDualBound, nodeDualBoundRaw);
+
+                for (auto &child : children)
+                {
+                    nodes.push_back(std::move(child));
+                    frontier.push_back(static_cast<int>(nodes.size()) - 1);
+                }
+                usedBalas = true;
+            }
         }
 
-        BranchNodeState childZero;
-        if (append_decision_if_consistent(branchNode, branchVar, 0, &childZero))
+        if (!usedBalas)
         {
-            childZero.parentDualBound = nodeDualBound;
-            childZero.parentDualBoundRaw = nodeDualBoundRaw;
-            nodes.push_back(childZero);
-            frontier.push_back(static_cast<int>(nodes.size()) - 1);
-        }
+            // Fallback: standard binary branching (BR2)
+            const int branchVar = selector->select(result.primalSolution, base.obj, fractionalCandidates);
+            if (branchVar < 0)
+            {
+                continue;
+            }
 
-        BranchNodeState childOne;
-        if (append_decision_if_consistent(branchNode, branchVar, 1, &childOne))
-        {
-            childOne.parentDualBound = nodeDualBound;
-            childOne.parentDualBoundRaw = nodeDualBoundRaw;
-            nodes.push_back(childOne);
-            frontier.push_back(static_cast<int>(nodes.size()) - 1);
+            BranchNodeState childZero;
+            if (append_decision_if_consistent(branchNode, branchVar, 0, &childZero))
+            {
+                childZero.parentDualBound = nodeDualBound;
+                childZero.parentDualBoundRaw = nodeDualBoundRaw;
+                nodes.push_back(childZero);
+                frontier.push_back(static_cast<int>(nodes.size()) - 1);
+            }
+
+            BranchNodeState childOne;
+            if (append_decision_if_consistent(branchNode, branchVar, 1, &childOne))
+            {
+                childOne.parentDualBound = nodeDualBound;
+                childOne.parentDualBoundRaw = nodeDualBoundRaw;
+                nodes.push_back(childOne);
+                frontier.push_back(static_cast<int>(nodes.size()) - 1);
+            }
         }
 
         // Adaptive iteration control: check for MIP gap stagnation.

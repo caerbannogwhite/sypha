@@ -1,4 +1,5 @@
 #include "sypha_solver_cuts.h"
+#include "sypha_solver_balas.h"
 
 #include <algorithm>
 #include <cmath>
@@ -215,6 +216,99 @@ public:
     }
 };
 
+// Balas BCG cut separator (Algorithm 2).
+//
+// For each row i with positive dual, collect columns j with negative reduced
+// cost that cover row i and have positive LP value. If sum x*_j < 1, the
+// inequality sum_{j in W_i} x_j >= 1 is a valid violated cut.
+class BalasCutSeparator : public ICutSeparator
+{
+public:
+    std::vector<CutConstraint> separate(
+        const std::vector<double> &primalSolution,
+        const std::vector<double> &dualSolution,
+        const BaseRelaxationModel &base,
+        int ncolsOriginal,
+        double tol) const override
+    {
+        std::vector<CutConstraint> cuts;
+
+        if (static_cast<int>(dualSolution.size()) < base.nrows ||
+            static_cast<int>(primalSolution.size()) < ncolsOriginal)
+        {
+            return cuts;
+        }
+
+        std::vector<double> reducedCosts = compute_reduced_costs(
+            base.obj, dualSolution, base, ncolsOriginal);
+
+        // Collect violated cuts with their violation depth for sorting
+        struct CutWithViolation
+        {
+            CutConstraint cut;
+            double violation;
+        };
+        std::vector<CutWithViolation> candidates;
+
+        for (int i = 0; i < base.nrows; ++i)
+        {
+            if (dualSolution[static_cast<size_t>(i)] <= tol)
+                continue;
+
+            std::vector<int> Wi;
+            double lhsVal = 0.0;
+
+            for (int k = base.csrOffs[static_cast<size_t>(i)];
+                 k < base.csrOffs[static_cast<size_t>(i) + 1]; ++k)
+            {
+                const int col = base.csrInds[static_cast<size_t>(k)];
+                if (col < 0 || col >= ncolsOriginal)
+                    continue;
+                if (base.csrVals[static_cast<size_t>(k)] <= tol)
+                    continue;
+                if (reducedCosts[static_cast<size_t>(col)] >= -tol)
+                    continue;
+                if (primalSolution[static_cast<size_t>(col)] <= tol)
+                    continue;
+
+                Wi.push_back(col);
+                lhsVal += primalSolution[static_cast<size_t>(col)];
+            }
+
+            if (Wi.empty())
+                continue;
+
+            const double violation = 1.0 - lhsVal;
+            if (violation <= tol)
+                continue;
+
+            CutConstraint cut;
+            cut.type = "balas_bcg";
+            cut.rhs = 1.0;
+            cut.indices = std::move(Wi);
+            cut.values.assign(cut.indices.size(), 1.0);
+            candidates.push_back({std::move(cut), violation});
+        }
+
+        // Sort by most violated first
+        std::sort(candidates.begin(), candidates.end(),
+                  [](const CutWithViolation &a, const CutWithViolation &b)
+                  {
+                      return a.violation > b.violation;
+                  });
+
+        const size_t maxCuts = 50;
+        const size_t nCuts = std::min(candidates.size(), maxCuts);
+        cuts.reserve(nCuts);
+        for (size_t ci = 0; ci < nCuts; ++ci)
+        {
+            cuts.push_back(std::move(candidates[ci].cut));
+        }
+
+        return cuts;
+    }
+};
+
 } // namespace
 
 std::vector<std::unique_ptr<ICutSeparator>> makeCutSeparators()
@@ -222,6 +316,7 @@ std::vector<std::unique_ptr<ICutSeparator>> makeCutSeparators()
     std::vector<std::unique_ptr<ICutSeparator>> separators;
     separators.push_back(std::make_unique<DualAggregatedCgSeparator>());
     separators.push_back(std::make_unique<RowPairCgSeparator>());
+    separators.push_back(std::make_unique<BalasCutSeparator>());
     return separators;
 }
 

@@ -43,6 +43,8 @@ constexpr bool kBnbAutoFallbackLp = true;
 constexpr bool kBnbCutsEnabled = true;
 constexpr int kBnbCutRoundsRoot = 5;
 constexpr int kBnbMaxCutsPerRound = 50;
+constexpr bool kBnbBalasBranchingEnabled = true;
+constexpr int kBnbBalasMaxBranches = 10;
 constexpr bool kShowSolution = false;
 constexpr double kPreprocessTimeLimitSeconds = 5.0;
 

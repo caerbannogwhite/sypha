@@ -61,6 +61,8 @@ private:
     bool bnbCutsEnabled;
     int bnbCutRoundsRoot;
     int bnbMaxCutsPerRound;
+    bool bnbBalasBranchingEnabled;
+    int bnbBalasMaxBranches;
     bool showSolution;
     std::string preprocessColumnStrategies;
     double preprocessTimeLimitSeconds;
@@ -115,6 +117,8 @@ public:
     bool getBnbCutsEnabled() const;
     int getBnbCutRoundsRoot() const;
     int getBnbMaxCutsPerRound() const;
+    bool getBnbBalasBranchingEnabled() const;
+    int getBnbBalasMaxBranches() const;
 
     const std::string &getPreprocessColumnStrategies() const;
     double getPreprocessTimeLimitSeconds() const;
