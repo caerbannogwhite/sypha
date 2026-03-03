@@ -212,6 +212,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     std::vector<double> bestIntegerSolution;
     std::string incumbentSource = "none";
     double globalRelaxLowerBound = std::numeric_limits<double>::infinity();
+    double globalRelaxLowerBoundRaw = std::numeric_limits<double>::infinity();
 
     // ====================================================================
     // Phase 1: Greedy set cover heuristic (CPU, O(n log n + nnz))
@@ -339,6 +340,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         if ((presolveResult.terminationReason == SOLVER_TERM_CONVERGED) && dualBoundConsistent)
         {
             double rootDual = presolveResult.dualObj;
+            globalRelaxLowerBoundRaw = std::min(globalRelaxLowerBoundRaw, rootDual);
             if (objIsIntegral)
                 rootDual = tighten_dual_bound(rootDual, integralityTol);
             globalRelaxLowerBound = std::min(globalRelaxLowerBound, rootDual);
@@ -389,6 +391,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     // ====================================================================
     // Phase 6.5: Root cut separation rounds
     // ====================================================================
+    int rootCutsAdded = 0;
     if (node.env->getBnbCutsEnabled() && node.env->getBnbCutRoundsRoot() > 0)
     {
         auto separators = makeCutSeparators();
@@ -419,7 +422,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             SolverExecutionConfig cutConfig;
             cutConfig.maxIterations = node.env->getMehrotraMaxIter();
             cutConfig.gapStagnation.enabled = false;
-            cutConfig.bnbNodeOrdinal = 0;
+            cutConfig.bnbNodeOrdinal = cutRound + 1;
             cutConfig.denseSelectionLogEveryNodes = 10;
 
             SolverExecutionResult cutResult;
@@ -439,6 +442,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                 (cutResult.dualObj <= cutResult.primalObj + node.env->getPxTolerance()))
             {
                 double cutDual = cutResult.dualObj;
+                globalRelaxLowerBoundRaw = std::min(globalRelaxLowerBoundRaw, cutDual);
                 if (objIsIntegral)
                     cutDual = tighten_dual_bound(cutDual, integralityTol);
                 globalRelaxLowerBound = std::min(globalRelaxLowerBound, cutDual);
@@ -531,6 +535,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                 return CODE_GENERIC_ERROR;
             }
         }
+        rootCutsAdded = totalCutsAdded;
     }
 
     // Pre-allocate IPM workspace for B&B reuse (avoids ~20 cudaMalloc/cudaFree per node).
@@ -567,6 +572,9 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         rootState.parentDualBound = std::isfinite(globalRelaxLowerBound)
                                         ? globalRelaxLowerBound
                                         : -std::numeric_limits<double>::infinity();
+        rootState.parentDualBoundRaw = std::isfinite(globalRelaxLowerBoundRaw)
+                                           ? globalRelaxLowerBoundRaw
+                                           : -std::numeric_limits<double>::infinity();
         nodes.push_back(rootState);
     }
 
@@ -641,14 +649,17 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         {
             {
                 double newGlobalBound = std::numeric_limits<double>::infinity();
+                double newGlobalBoundRaw = std::numeric_limits<double>::infinity();
                 for (const int fIdx : frontier)
                 {
                     newGlobalBound = std::min(newGlobalBound, nodes[static_cast<size_t>(fIdx)].parentDualBound);
+                    newGlobalBoundRaw = std::min(newGlobalBoundRaw, nodes[static_cast<size_t>(fIdx)].parentDualBoundRaw);
                 }
                 for (size_t wi = deviceWindow.cursorPos(); wi < deviceWindow.windowSize(); ++wi)
                 {
                     const int bufferedNodeId = deviceWindow.peekNodeId(wi);
                     newGlobalBound = std::min(newGlobalBound, nodes[static_cast<size_t>(bufferedNodeId)].parentDualBound);
+                    newGlobalBoundRaw = std::min(newGlobalBoundRaw, nodes[static_cast<size_t>(bufferedNodeId)].parentDualBoundRaw);
                 }
                 if (std::isfinite(newGlobalBound))
                 {
@@ -658,6 +669,14 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                 {
                     globalRelaxLowerBound = bestIntegerObj;
                 }
+                if (std::isfinite(newGlobalBoundRaw))
+                {
+                    globalRelaxLowerBoundRaw = newGlobalBoundRaw;
+                }
+                else if (frontier.empty() && !deviceWindow.hasBufferedNode())
+                {
+                    globalRelaxLowerBoundRaw = bestIntegerObj;
+                }
             }
             char incumbentStr[64];
             char dualStr[64];
@@ -666,19 +685,19 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                 snprintf(incumbentStr, sizeof(incumbentStr), "%.12g", bestIntegerObj);
             else
                 snprintf(incumbentStr, sizeof(incumbentStr), "inf");
-            if (std::isfinite(globalRelaxLowerBound))
-                snprintf(dualStr, sizeof(dualStr), "%.12g", globalRelaxLowerBound);
+            if (std::isfinite(globalRelaxLowerBoundRaw))
+                snprintf(dualStr, sizeof(dualStr), "%.12g", globalRelaxLowerBoundRaw);
             else
                 snprintf(dualStr, sizeof(dualStr), "inf");
-            const double currGap = compute_mip_gap(bestIntegerObj, globalRelaxLowerBound);
+            const double currGap = compute_mip_gap(bestIntegerObj, globalRelaxLowerBoundRaw);
             if (std::isfinite(currGap))
                 snprintf(gapStr, sizeof(gapStr), "%.4f%%", currGap * 100.0);
             else
                 snprintf(gapStr, sizeof(gapStr), "inf");
             log->log(LOG_INFO,
-                     "  nodes=%4d frontier=%4zu lp_iters=%5d incumbent=%10s dual=%10s gap=%6s elapsed=%.2fs",
-                     processedNodes, frontier.size(), totalLpIterations,
-                     incumbentStr, dualStr, gapStr, (loopNowMs - bnbStartMs) / 1000.0);
+                     "  nodes=%4d frontier=%4zu lp_iters=%5d cuts=%4d incumbent=%10s dual=%10s gap=%6s",
+                     processedNodes, frontier.size(), totalLpIterations, rootCutsAdded,
+                     incumbentStr, dualStr, gapStr);
             nextLogMs = loopNowMs + logIntervalMs;
         }
 
@@ -773,6 +792,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             (result.status == CODE_SUCCESSFUL) &&
             (result.terminationReason == SOLVER_TERM_CONVERGED) &&
             dualBoundConsistent;
+        double nodeDualBoundRaw = (boundIsReliableForPruning) ? result.dualObj : branchNode.parentDualBoundRaw;
         double nodeDualBound = (boundIsReliableForPruning) ? result.dualObj : branchNode.parentDualBound;
         if (objIsIntegral && boundIsReliableForPruning && std::isfinite(nodeDualBound))
             nodeDualBound = tighten_dual_bound(nodeDualBound, integralityTol);
@@ -871,6 +891,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         if (append_decision_if_consistent(branchNode, branchVar, 0, &childZero))
         {
             childZero.parentDualBound = nodeDualBound;
+            childZero.parentDualBoundRaw = nodeDualBoundRaw;
             nodes.push_back(childZero);
             frontier.push_back(static_cast<int>(nodes.size()) - 1);
         }
@@ -879,6 +900,7 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         if (append_decision_if_consistent(branchNode, branchVar, 1, &childOne))
         {
             childOne.parentDualBound = nodeDualBound;
+            childOne.parentDualBoundRaw = nodeDualBoundRaw;
             nodes.push_back(childOne);
             frontier.push_back(static_cast<int>(nodes.size()) - 1);
         }
@@ -924,14 +946,17 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     // Recompute global dual bound from remaining open nodes.
     {
         double newGlobalBound = std::numeric_limits<double>::infinity();
+        double newGlobalBoundRaw = std::numeric_limits<double>::infinity();
         for (const int fIdx : frontier)
         {
             newGlobalBound = std::min(newGlobalBound, nodes[static_cast<size_t>(fIdx)].parentDualBound);
+            newGlobalBoundRaw = std::min(newGlobalBoundRaw, nodes[static_cast<size_t>(fIdx)].parentDualBoundRaw);
         }
         for (size_t wi = deviceWindow.cursorPos(); wi < deviceWindow.windowSize(); ++wi)
         {
             const int bufferedNodeId = deviceWindow.peekNodeId(wi);
             newGlobalBound = std::min(newGlobalBound, nodes[static_cast<size_t>(bufferedNodeId)].parentDualBound);
+            newGlobalBoundRaw = std::min(newGlobalBoundRaw, nodes[static_cast<size_t>(bufferedNodeId)].parentDualBoundRaw);
         }
         if (std::isfinite(newGlobalBound))
         {
@@ -940,6 +965,14 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
         else if (frontier.empty() && !deviceWindow.hasBufferedNode() && std::isfinite(bestIntegerObj))
         {
             globalRelaxLowerBound = bestIntegerObj;
+        }
+        if (std::isfinite(newGlobalBoundRaw))
+        {
+            globalRelaxLowerBoundRaw = newGlobalBoundRaw;
+        }
+        else if (frontier.empty() && !deviceWindow.hasBufferedNode() && std::isfinite(bestIntegerObj))
+        {
+            globalRelaxLowerBoundRaw = bestIntegerObj;
         }
     }
 

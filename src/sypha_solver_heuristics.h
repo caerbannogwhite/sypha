@@ -26,6 +26,7 @@ struct BranchNodeState
     std::vector<CutConstraint> cuts; // Node-local cutting planes (in addition to base model cuts)
     int depth = 0;
     double parentDualBound = -std::numeric_limits<double>::infinity();
+    double parentDualBoundRaw = -std::numeric_limits<double>::infinity();
 };
 
 struct BaseRelaxationModel
