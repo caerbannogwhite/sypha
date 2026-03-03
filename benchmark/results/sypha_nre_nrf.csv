@@ -1,0 +1,11 @@
+instance,num_sets,num_elements,primal,dual,mip_gap_pct,iterations,time_pre_s,time_solver_s,time_total_s,incumbent,status
+scpnre1.txt,,,29,24,17.241379,1646,0.01,1.32,600.07,29,FEASIBLE
+scpnre2.txt,,,32,24,25.000000,1924,0.01,0.19,600.34,32,FEASIBLE
+scpnre3.txt,,,28,23,17.857143,2408,0.01,1.00,599.94,28,FEASIBLE
+scpnre4.txt,,,29,23,20.689655,2142,0.01,1.67,599.83,29,FEASIBLE
+scpnre5.txt,,,28,24,14.285714,2379,0.01,0.15,600.40,28,FEASIBLE
+scpnrf1.txt,,,14,11,21.428571,5630,0.00,0.06,600.04,14,FEASIBLE
+scpnrf2.txt,,,15,11,26.666667,5283,0.01,0.15,599.81,15,FEASIBLE
+scpnrf3.txt,,,15,11,26.666667,5220,0.01,0.34,599.85,15,FEASIBLE
+scpnrf4.txt,,,14,10,28.571429,5731,0.01,0.06,599.97,14,FEASIBLE
+scpnrf5.txt,,,14,9,35.714286,5764,0.00,0.05,599.99,14,FEASIBLE
