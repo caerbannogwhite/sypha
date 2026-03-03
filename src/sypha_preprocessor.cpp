@@ -487,6 +487,183 @@ public:
     }
 };
 
+class IncumbentBudgetPruningRule : public IColumnPreprocessRule
+{
+public:
+    const char *name() const override
+    {
+        return "incumbent_budget_pruning";
+    }
+
+    int apply(ColumnPreprocessContext &ctx, double tol) const override
+    {
+        if (ctx.nrows <= 0 || ctx.ncols <= 0 || !std::isfinite(ctx.incumbentBound))
+            return 0;
+
+        const double incumbentFloor = std::floor(ctx.incumbentBound);
+
+        // Pre-compute columnsByRow[r] = sorted (cost, colIndex) pairs for affordable-column lookup.
+        struct CostCol
+        {
+            double cost;
+            int col;
+        };
+        std::vector<std::vector<CostCol>> columnsByRow(static_cast<size_t>(ctx.nrows));
+        for (int j = 0; j < ctx.ncols; ++j)
+        {
+            if (!ctx.active[static_cast<size_t>(j)])
+                continue;
+            for (int row : ctx.rowsByColumn[static_cast<size_t>(j)])
+            {
+                columnsByRow[static_cast<size_t>(row)].push_back(
+                    {ctx.costs[static_cast<size_t>(j)], j});
+            }
+        }
+        for (auto &vec : columnsByRow)
+        {
+            std::sort(vec.begin(), vec.end(),
+                      [](const CostCol &a, const CostCol &b) { return a.cost < b.cost; });
+        }
+
+        // Sort active columns by cost descending (most expensive first).
+        std::vector<int> sortedCols;
+        sortedCols.reserve(static_cast<size_t>(ctx.ncols));
+        for (int j = 0; j < ctx.ncols; ++j)
+        {
+            if (ctx.active[static_cast<size_t>(j)])
+                sortedCols.push_back(j);
+        }
+        std::sort(sortedCols.begin(), sortedCols.end(),
+                  [&](int a, int b) { return ctx.costs[static_cast<size_t>(a)] > ctx.costs[static_cast<size_t>(b)]; });
+
+        // Collect all cost-1 columns for budget==1 tier.
+        std::vector<int> cost1Cols;
+        for (int j = 0; j < ctx.ncols; ++j)
+        {
+            if (ctx.active[static_cast<size_t>(j)] &&
+                std::fabs(ctx.costs[static_cast<size_t>(j)] - 1.0) <= tol)
+            {
+                cost1Cols.push_back(j);
+            }
+        }
+
+        int removed = 0;
+
+        for (int target : sortedCols)
+        {
+            if (std::chrono::steady_clock::now() >= ctx.deadline)
+                break;
+            if (!ctx.active[static_cast<size_t>(target)])
+                continue;
+
+            const double costJ = ctx.costs[static_cast<size_t>(target)];
+            const double budget = incumbentFloor - 1.0 - std::floor(costJ);
+
+            if (budget < -tol)
+            {
+                // Column alone costs >= incumbent; discard.
+                ctx.active[static_cast<size_t>(target)] = 0;
+                ++removed;
+                continue;
+            }
+
+            // Compute uncovered rows: rows in the universe not covered by column target.
+            const std::vector<int> &targetRows = ctx.rowsByColumn[static_cast<size_t>(target)];
+
+            // Build set of all rows, find those NOT in targetRows.
+            std::vector<int> uncoveredRows;
+            {
+                size_t ti = 0;
+                for (int r = 0; r < ctx.nrows; ++r)
+                {
+                    if (ti < targetRows.size() && targetRows[ti] == r)
+                    {
+                        ++ti;
+                        continue;
+                    }
+                    uncoveredRows.push_back(r);
+                }
+            }
+
+            if (uncoveredRows.empty())
+            {
+                // Column covers everything; it can participate in a solution.
+                continue;
+            }
+
+            if (budget < tol) // budget == 0
+            {
+                // No additional columns allowed, but uncovered rows remain.
+                ctx.active[static_cast<size_t>(target)] = 0;
+                ++removed;
+                continue;
+            }
+
+            if (budget < 1.0 + tol) // budget == 1
+            {
+                // Exactly one cost-1 column must cover all remaining rows.
+                bool found = false;
+                for (int k : cost1Cols)
+                {
+                    if (std::chrono::steady_clock::now() >= ctx.deadline)
+                        goto done;
+                    if (k == target || !ctx.active[static_cast<size_t>(k)])
+                        continue;
+                    if (isSubsetSorted(uncoveredRows, ctx.rowsByColumn[static_cast<size_t>(k)]))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                {
+                    ctx.active[static_cast<size_t>(target)] = 0;
+                    ++removed;
+                }
+                continue;
+            }
+
+            // budget >= 2: lower-bound check.
+            // For each uncovered row, find cheapest affordable column covering it.
+            // If any row has no affordable column, or max(min-cost) > budget, discard.
+            bool infeasible = false;
+            double maxMinCost = 0.0;
+            for (int r : uncoveredRows)
+            {
+                double cheapest = std::numeric_limits<double>::infinity();
+                for (const CostCol &cc : columnsByRow[static_cast<size_t>(r)])
+                {
+                    if (cc.col == target)
+                        continue;
+                    if (!ctx.active[static_cast<size_t>(cc.col)])
+                        continue;
+                    if (cc.cost <= budget + tol)
+                    {
+                        cheapest = cc.cost;
+                        break; // sorted by cost, first match is cheapest
+                    }
+                }
+                if (!std::isfinite(cheapest))
+                {
+                    infeasible = true;
+                    break;
+                }
+                if (cheapest > maxMinCost)
+                    maxMinCost = cheapest;
+            }
+
+            if (infeasible || maxMinCost > budget + tol)
+            {
+                ctx.active[static_cast<size_t>(target)] = 0;
+                ++removed;
+            }
+        }
+
+    done:
+        return removed;
+    }
+};
+
 } // namespace
 
 std::vector<std::unique_ptr<IColumnPreprocessRule>> makeColumnPreprocessRules(const std::string &configured)
@@ -518,6 +695,10 @@ std::vector<std::unique_ptr<IColumnPreprocessRule>> makeColumnPreprocessRules(co
         else if (token == "cost_driven_replacement" || token == "cost_driven")
         {
             rules.push_back(std::make_unique<CostDrivenReplacementRule>());
+        }
+        else if (token == "incumbent_budget_pruning" || token == "incumbent_budget")
+        {
+            rules.push_back(std::make_unique<IncumbentBudgetPruningRule>());
         }
     }
 

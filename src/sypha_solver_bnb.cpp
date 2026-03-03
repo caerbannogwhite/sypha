@@ -1,7 +1,9 @@
 #include "sypha_solver_bnb.h"
 #include "sypha_solver_cuts.h"
+#include "sypha_preprocessor.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 
@@ -154,6 +156,128 @@ BaseModelReductionResult reduce_base_model(
             else if (oldCol2 == base.ncolsOriginal + i)
             {
                 // Slack column: remap to newNcolsOriginal + i
+                newCsrInds.push_back(newNcolsOriginal + i);
+                newCsrVals.push_back(val);
+            }
+        }
+        newCsrOffs.push_back(static_cast<int>(newCsrVals.size()));
+    }
+
+    base.ncolsOriginal = newNcolsOriginal;
+    base.ncols = newNcolsOriginal + base.nrows;
+    base.nnz = static_cast<int>(newCsrVals.size());
+    base.csrInds = std::move(newCsrInds);
+    base.csrOffs = std::move(newCsrOffs);
+    base.csrVals = std::move(newCsrVals);
+    base.obj = std::move(newObj);
+    base.activeToOriginalCol = std::move(newActiveToOriginal);
+
+    return result;
+}
+
+BaseModelReductionResult reduce_base_model_budget_pruning(
+    BaseRelaxationModel &base, double incumbentBound, double tol,
+    double preprocessTimeLimitSec)
+{
+    BaseModelReductionResult result;
+    result.oldToNew.assign(static_cast<size_t>(base.ncolsOriginal), 0);
+
+    if (base.nrows <= 0 || base.ncolsOriginal <= 0 || !std::isfinite(incumbentBound))
+        return result;
+
+    // Build ColumnPreprocessContext from base model.
+    ColumnPreprocessContext ctx;
+    ctx.nrows = base.nrows;
+    ctx.ncols = base.ncolsOriginal;
+    ctx.costs.assign(base.obj.begin(), base.obj.begin() + base.ncolsOriginal);
+    ctx.active.assign(static_cast<size_t>(ctx.ncols), 1);
+    ctx.incumbentBound = incumbentBound;
+    if (preprocessTimeLimitSec > 0.0)
+    {
+        ctx.deadline = std::chrono::steady_clock::now() +
+                       std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                           std::chrono::duration<double>(preprocessTimeLimitSec));
+    }
+
+    // Build rowsByColumn from CSR.
+    ctx.rowsByColumn.assign(static_cast<size_t>(ctx.ncols), std::vector<int>());
+    for (int i = 0; i < base.nrows; ++i)
+    {
+        const int begin = base.csrOffs[static_cast<size_t>(i)];
+        const int end = base.csrOffs[static_cast<size_t>(i) + 1];
+        for (int k = begin; k < end; ++k)
+        {
+            const int col = base.csrInds[static_cast<size_t>(k)];
+            const double val = base.csrVals[static_cast<size_t>(k)];
+            if (col >= 0 && col < base.ncolsOriginal && val > tol)
+            {
+                ctx.rowsByColumn[static_cast<size_t>(col)].push_back(i);
+            }
+        }
+    }
+
+    // Run the incumbent budget pruning rule.
+    std::vector<std::unique_ptr<IColumnPreprocessRule>> rules = makeColumnPreprocessRules("incumbent_budget_pruning");
+    int removedByRules = 0;
+    for (const std::unique_ptr<IColumnPreprocessRule> &rule : rules)
+    {
+        removedByRules += rule->apply(ctx, tol);
+    }
+
+    if (removedByRules <= 0)
+        return result;
+
+    // Build oldToNew mapping and rebuild base model.
+    std::vector<int> newToOld;
+    std::vector<int> newActiveToOriginal;
+    int newCol = 0;
+    for (int oldCol = 0; oldCol < base.ncolsOriginal; ++oldCol)
+    {
+        if (!ctx.active[static_cast<size_t>(oldCol)])
+        {
+            result.oldToNew[static_cast<size_t>(oldCol)] = -1;
+            ++result.columnsRemoved;
+        }
+        else
+        {
+            result.oldToNew[static_cast<size_t>(oldCol)] = newCol;
+            newToOld.push_back(oldCol);
+            newActiveToOriginal.push_back(base.activeToOriginalCol[static_cast<size_t>(oldCol)]);
+            ++newCol;
+        }
+    }
+
+    const int newNcolsOriginal = newCol;
+
+    // Rebuild objective.
+    std::vector<double> newObj(static_cast<size_t>(newNcolsOriginal + base.nrows), 0.0);
+    for (int j = 0; j < newNcolsOriginal; ++j)
+        newObj[static_cast<size_t>(j)] = base.obj[static_cast<size_t>(newToOld[static_cast<size_t>(j)])];
+
+    // Rebuild CSR.
+    std::vector<int> newCsrInds;
+    std::vector<int> newCsrOffs;
+    std::vector<double> newCsrVals;
+    newCsrOffs.reserve(static_cast<size_t>(base.nrows) + 1);
+    newCsrOffs.push_back(0);
+
+    for (int i = 0; i < base.nrows; ++i)
+    {
+        for (int k = base.csrOffs[static_cast<size_t>(i)]; k < base.csrOffs[static_cast<size_t>(i) + 1]; ++k)
+        {
+            const int oldCol2 = base.csrInds[static_cast<size_t>(k)];
+            const double val = base.csrVals[static_cast<size_t>(k)];
+            if (oldCol2 >= 0 && oldCol2 < base.ncolsOriginal)
+            {
+                const int mapped = result.oldToNew[static_cast<size_t>(oldCol2)];
+                if (mapped >= 0)
+                {
+                    newCsrInds.push_back(mapped);
+                    newCsrVals.push_back(val);
+                }
+            }
+            else if (oldCol2 == base.ncolsOriginal + i)
+            {
                 newCsrInds.push_back(newNcolsOriginal + i);
                 newCsrVals.push_back(val);
             }

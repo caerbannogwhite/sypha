@@ -30,6 +30,7 @@ struct ColumnPreprocessContext
     std::vector<double> costs;
     std::vector<char> active;
     std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
+    double incumbentBound = std::numeric_limits<double>::infinity();
 };
 
 class IColumnPreprocessRule

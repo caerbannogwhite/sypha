@@ -44,6 +44,10 @@ struct BaseModelReductionResult
 BaseModelReductionResult reduce_base_model(
     BaseRelaxationModel &base, double incumbentBound, double tol);
 
+BaseModelReductionResult reduce_base_model_budget_pruning(
+    BaseRelaxationModel &base, double incumbentBound, double tol,
+    double preprocessTimeLimitSec);
+
 bool remap_branch_node(
     BranchNodeState &node, const std::vector<int> &oldToNew);
 

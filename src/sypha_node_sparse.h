@@ -103,6 +103,7 @@ public:
     SyphaStatus reduceByIncumbent(double incumbentUpperBound);
     SyphaStatus applyDominancePreprocessing();
     SyphaStatus applyCostDrivenReduction();
+    SyphaStatus applyIncumbentBudgetPruning(double incumbentUpperBound);
     SyphaStatus copyModelOnDevice();
     SyphaStatus setInitValues();
     SyphaStatus setUpCuda();

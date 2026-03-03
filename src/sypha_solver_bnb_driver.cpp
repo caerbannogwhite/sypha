@@ -114,6 +114,52 @@ static int midBnbColumnRemoval(
     return reduction.columnsRemoved;
 }
 
+// Helper: mid-BnB incumbent budget pruning when incumbent improves.
+// Returns number of columns removed.
+static int midBnbBudgetPruning(
+    BaseRelaxationModel &base,
+    double bestIntegerObj,
+    double tol,
+    double preprocessTimeLimitSec,
+    std::deque<int> &frontier,
+    std::vector<BranchNodeState> &nodes,
+    DeviceNodeWindow &deviceWindow,
+    SyphaLogger *log)
+{
+    BaseModelReductionResult reduction = reduce_base_model_budget_pruning(
+        base, bestIntegerObj, tol, preprocessTimeLimitSec);
+    if (reduction.columnsRemoved <= 0)
+        return 0;
+
+    log->log(LOG_INFO, "Mid-BnB budget pruning: %d cols removed, %d remaining",
+             reduction.columnsRemoved, base.ncolsOriginal);
+
+    // Remap frontier nodes.
+    {
+        std::deque<int> surviving;
+        for (const int fIdx : frontier)
+        {
+            if (remap_branch_node(nodes[static_cast<size_t>(fIdx)], reduction.oldToNew))
+            {
+                surviving.push_back(fIdx);
+            }
+        }
+        frontier.swap(surviving);
+    }
+
+    // Remap buffered device window nodes (not yet processed).
+    for (size_t wi = deviceWindow.cursorPos(); wi < deviceWindow.windowSize(); ++wi)
+    {
+        const int bufferedId = deviceWindow.peekNodeId(wi);
+        if (!remap_branch_node(nodes[static_cast<size_t>(bufferedId)], reduction.oldToNew))
+        {
+            nodes[static_cast<size_t>(bufferedId)].parentDualBound = std::numeric_limits<double>::infinity();
+        }
+    }
+
+    return reduction.columnsRemoved;
+}
+
 SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
 {
     SyphaLogger *log = node.env->getLogger();
@@ -246,18 +292,17 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     }
 
     // ====================================================================
-    // Phase 2: First column removal using greedy incumbent
+    // Phase 2: Column removal using greedy incumbent (cost + budget)
     // ====================================================================
     if (std::isfinite(bestIntegerObj))
     {
         const int colsBefore = node.ncolsOriginal;
         node.reduceByIncumbent(bestIntegerObj);
+        node.applyIncumbentBudgetPruning(bestIntegerObj);
         if (node.ncolsOriginal < colsBefore)
-        {
-            log->log(LOG_INFO, "Greedy reduction: cols %d->%d, nnz %d->%d",
+            log->log(LOG_INFO, "Greedy incumbent reduction: cols %d->%d, nnz %d->%d",
                      colsBefore, node.ncolsOriginal,
                      originalNnzForPreprocess, node.nnz);
-        }
     }
 
     // ====================================================================
@@ -352,16 +397,16 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
     }
 
     // ====================================================================
-    // Phase 4: Second column removal with improved incumbent
+    // Phase 4: Second column removal with improved incumbent (cost + budget)
     // ====================================================================
     if (std::isfinite(bestIntegerObj))
     {
         const int colsBefore = node.ncolsOriginal;
         node.reduceByIncumbent(bestIntegerObj);
+        node.applyIncumbentBudgetPruning(bestIntegerObj);
         if (node.ncolsOriginal < colsBefore)
-        {
-            log->log(LOG_INFO, "LP heuristic reduction: cols %d->%d", colsBefore, node.ncolsOriginal);
-        }
+            log->log(LOG_INFO, "LP incumbent reduction: cols %d->%d, nnz %d->%d",
+                     colsBefore, node.ncolsOriginal, originalNnzForPreprocess, node.nnz);
     }
 
     // ====================================================================
@@ -536,6 +581,37 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
             }
         }
         rootCutsAdded = totalCutsAdded;
+    }
+
+    // ====================================================================
+    // Phase 6.7: Post-cut budget pruning with final incumbent
+    // ====================================================================
+    if (std::isfinite(bestIntegerObj))
+    {
+        BaseModelReductionResult budgetReduction = reduce_base_model_budget_pruning(
+            base, bestIntegerObj, node.env->getPxTolerance(),
+            node.env->getPreprocessTimeLimitSeconds());
+        if (budgetReduction.columnsRemoved > 0)
+        {
+            log->log(LOG_INFO, "Post-cut budget pruning: %d cols removed, %d remaining",
+                     budgetReduction.columnsRemoved, base.ncolsOriginal);
+
+            // Refresh node from pruned base model.
+            node.nrows = base.nrows;
+            node.ncols = base.ncols;
+            node.ncolsOriginal = base.ncolsOriginal;
+            node.nnz = base.nnz;
+            node.hCsrMatInds = base.csrInds;
+            node.hCsrMatOffs = base.csrOffs;
+            node.hCsrMatVals = base.csrVals;
+            node.hObjDns = base.obj;
+            node.hRhsDns = base.rhs;
+
+            if (node.copyModelOnDevice() != CODE_SUCCESSFUL)
+            {
+                return CODE_GENERIC_ERROR;
+            }
+        }
     }
 
     // Pre-allocate IPM workspace for B&B reuse (avoids ~20 cudaMalloc/cudaFree per node).
@@ -838,6 +914,19 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
                         return CODE_GENERIC_ERROR;
                     }
                 }
+
+                // Mid-BnB incumbent budget pruning.
+                if (midBnbBudgetPruning(base, bestIntegerObj, node.env->getPxTolerance(),
+                                        node.env->getPreprocessTimeLimitSeconds(),
+                                        frontier, nodes, deviceWindow, log) > 0)
+                {
+                    if (refreshNodeFromBase(base, d_baseInds, d_baseOffs, d_baseVals) != CODE_SUCCESSFUL)
+                    {
+                        releaseIpmWorkspace(&ipmWorkspace);
+                        releaseBaseCopies();
+                        return CODE_GENERIC_ERROR;
+                    }
+                }
             }
         }
 
@@ -861,6 +950,19 @@ SyphaStatus solver_sparse_branch_and_bound(SyphaNodeSparse &node)
 
                 // Mid-BnB column removal.
                 if (midBnbColumnRemoval(base, bestIntegerObj, node.env->getPxTolerance(),
+                                        frontier, nodes, deviceWindow, log) > 0)
+                {
+                    if (refreshNodeFromBase(base, d_baseInds, d_baseOffs, d_baseVals) != CODE_SUCCESSFUL)
+                    {
+                        releaseIpmWorkspace(&ipmWorkspace);
+                        releaseBaseCopies();
+                        return CODE_GENERIC_ERROR;
+                    }
+                }
+
+                // Mid-BnB incumbent budget pruning.
+                if (midBnbBudgetPruning(base, bestIntegerObj, node.env->getPxTolerance(),
+                                        node.env->getPreprocessTimeLimitSeconds(),
                                         frontier, nodes, deviceWindow, log) > 0)
                 {
                     if (refreshNodeFromBase(base, d_baseInds, d_baseOffs, d_baseVals) != CODE_SUCCESSFUL)

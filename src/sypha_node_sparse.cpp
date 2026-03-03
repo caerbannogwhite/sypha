@@ -487,6 +487,89 @@ SyphaStatus SyphaNodeSparse::applyCostDrivenReduction()
     return CODE_SUCCESSFUL;
 }
 
+SyphaStatus SyphaNodeSparse::applyIncumbentBudgetPruning(double incumbentUpperBound)
+{
+    if (this->nrows <= 0 || this->ncolsOriginal <= 0 || this->hObjDns.empty() ||
+        this->hCsrMatInds.empty() || this->hCsrMatOffs.empty() || this->hCsrMatVals.empty())
+    {
+        return CODE_SUCCESSFUL;
+    }
+    if (!std::isfinite(incumbentUpperBound))
+    {
+        return CODE_SUCCESSFUL;
+    }
+
+    initActiveColTracking();
+
+    ColumnPreprocessContext ctx;
+    ctx.nrows = this->nrows;
+    ctx.ncols = this->ncolsOriginal;
+    ctx.rowsByColumn.assign(static_cast<size_t>(ctx.ncols), std::vector<int>());
+    ctx.costs.assign(this->hObjDns.begin(), this->hObjDns.begin() + this->ncolsOriginal);
+    ctx.active.assign(static_cast<size_t>(ctx.ncols), 1);
+    ctx.incumbentBound = incumbentUpperBound;
+    if (this->env->getPreprocessTimeLimitSeconds() > 0.0)
+    {
+        ctx.deadline = std::chrono::steady_clock::now() +
+                       std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                           std::chrono::duration<double>(this->env->getPreprocessTimeLimitSeconds()));
+    }
+
+    for (int i = 0; i < this->nrows; ++i)
+    {
+        const int begin = this->hCsrMatOffs[static_cast<size_t>(i)];
+        const int end = this->hCsrMatOffs[static_cast<size_t>(i) + 1];
+        for (int k = begin; k < end; ++k)
+        {
+            const int col = this->hCsrMatInds[static_cast<size_t>(k)];
+            const double val = this->hCsrMatVals[static_cast<size_t>(k)];
+            if (col >= 0 && col < this->ncolsOriginal && val > this->env->getPxTolerance())
+            {
+                ctx.rowsByColumn[static_cast<size_t>(col)].push_back(i);
+            }
+        }
+    }
+
+    std::vector<std::unique_ptr<IColumnPreprocessRule>> rules = makeColumnPreprocessRules("incumbent_budget_pruning");
+    int removedByRules = 0;
+    for (const std::unique_ptr<IColumnPreprocessRule> &rule : rules)
+    {
+        removedByRules += rule->apply(ctx, this->env->getPxTolerance());
+    }
+
+    if (removedByRules <= 0)
+    {
+        return CODE_SUCCESSFUL;
+    }
+
+    std::vector<int> newActiveToInput;
+    std::vector<int> newToOld;
+    newActiveToInput.reserve(static_cast<size_t>(ctx.ncols));
+    newToOld.reserve(static_cast<size_t>(ctx.ncols));
+    std::vector<int> oldToNew(static_cast<size_t>(ctx.ncols), -1);
+    for (int oldCol = 0; oldCol < ctx.ncols; ++oldCol)
+    {
+        if (!ctx.active[static_cast<size_t>(oldCol)])
+        {
+            continue;
+        }
+        const int newCol = static_cast<int>(newActiveToInput.size());
+        oldToNew[static_cast<size_t>(oldCol)] = newCol;
+        newActiveToInput.push_back(this->hActiveToInputCols[static_cast<size_t>(oldCol)]);
+        newToOld.push_back(oldCol);
+    }
+
+    if (newActiveToInput.empty())
+    {
+        this->env->getLogger()->log(LOG_INFO, "Incumbent budget pruning removed all columns; keeping original model");
+        return CODE_SUCCESSFUL;
+    }
+
+    rebuildCsrAfterRemoval(oldToNew, newToOld, newActiveToInput, ctx.costs.data());
+
+    return CODE_SUCCESSFUL;
+}
+
 SyphaStatus SyphaNodeSparse::releaseModelOnDevice()
 {
     if (this->dCsrMatInds)
